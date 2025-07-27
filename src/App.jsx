@@ -1,6 +1,35 @@
 import React, { useState, useRef, useEffect } from 'react';
+// Importaciones de Firebase
+import { initializeApp } from 'firebase/app';
+import { getFirestore, collection, onSnapshot, doc, writeBatch, query, updateDoc } from 'firebase/firestore';
+import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
-// --- Lógica de Negocio y Utilidades ---
+
+// --- PASO FINAL: Pega aquí tu configuración de Firebase ---
+// Reemplaza este objeto con el que copiaste de la consola de Firebase
+const firebaseConfig = {
+  apiKey: "AIzaSyBLjqzXcFGzKqT5PjLSHbFc2fFmt7qY7yA",
+  authDomain: "rowa-e0885.firebaseapp.com",
+  projectId: "rowa-e0885",
+  storageBucket: "rowa-e0885.firebasestorage.app",
+  messagingSenderId: "709936077778",
+  appId: "1:709936077778:web:2ec2ad5853f803baac860b"
+};
+
+// Inicialización de Firebase
+let app;
+let db;
+let auth;
+
+// Se inicializa solo si la configuración es válida
+if (firebaseConfig.apiKey !== "TU_API_KEY") {
+    app = initializeApp(firebaseConfig);
+    db = getFirestore(app);
+    auth = getAuth(app);
+}
+
+
+// --- Lógica de Negocio y Utilidades (Para la App de Picking) ---
 const pickingUtils = {
     processRepartoGeneral: (datos, config) => {
         const { articulosAExcluir, palabrasAExcluir } = config;
@@ -56,6 +85,39 @@ const pickingUtils = {
 function App() {
     const [currentView, setCurrentView] = useState('hub');
     const [isXlsxReady, setIsXlsxReady] = useState(false);
+    const [user, setUser] = useState(null);
+    const [authError, setAuthError] = useState(null);
+    const [isAuthenticating, setIsAuthenticating] = useState(true);
+
+    // Verificación de configuración de Firebase
+    if (!app) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-red-50 text-red-800 text-center">
+                <h1 className="text-4xl font-bold mb-4">Error de Configuración</h1>
+                <p className="text-xl max-w-2xl">La configuración de Firebase no se ha añadido todavía.</p>
+                <p className="mt-4 text-lg max-w-2xl">Por favor, abre el archivo <strong>App.jsx</strong>, busca el objeto <code>firebaseConfig</code> y reemplázalo con las credenciales de tu proyecto.</p>
+            </div>
+        );
+    }
+
+    useEffect(() => {
+        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+            setUser(currentUser);
+            setIsAuthenticating(false);
+        }, (error) => {
+            console.error("Error en onAuthStateChanged:", error);
+            setAuthError(error.message);
+            setIsAuthenticating(false);
+        });
+
+        signInAnonymously(auth).catch(error => {
+            console.error("Error en la autenticación anónima:", error);
+            setAuthError(error.message);
+            setIsAuthenticating(false);
+        });
+
+        return () => unsubscribe();
+    }, []);
 
     useEffect(() => {
         if (window.XLSX) {
@@ -76,11 +138,34 @@ function App() {
     const navigateTo = (view) => setCurrentView(view);
 
     const renderView = () => {
+        if (isAuthenticating) {
+            return <div className="flex items-center justify-center min-h-screen"><p>Autenticando...</p></div>;
+        }
+
+        if (authError) {
+            return (
+                <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-red-50 text-red-800 text-center">
+                    <h1 className="text-4xl font-bold mb-4">Error de Autenticación</h1>
+                    <p className="text-xl max-w-2xl">No se pudo conectar con la base de datos.</p>
+                    <p className="mt-4 text-sm max-w-2xl bg-red-100 p-2 rounded">
+                        <strong>Detalle del error:</strong> {authError}
+                    </p>
+                    <p className="mt-4 text-lg max-w-2xl">
+                        Por favor, verifica que tu <strong>firebaseConfig</strong> sea correcta y que la <strong>autenticación anónima</strong> esté habilitada en la consola de Firebase.
+                    </p>
+                </div>
+            );
+        }
+
+        if (!user) {
+            return <div className="flex items-center justify-center min-h-screen"><p>Error: No se pudo obtener el usuario. Refresca la página.</p></div>;
+        }
+
         switch (currentView) {
             case 'picking':
                 return <PickingApp onNavigate={navigateTo} isXlsxReady={isXlsxReady} />;
             case 'reception':
-                return <ReceptionApp onNavigate={navigateTo} isXlsxReady={isXlsxReady} />;
+                return <ReceptionApp onNavigate={navigateTo} isXlsxReady={isXlsxReady} user={user} />;
             case 'hub':
             default:
                 return <Hub onNavigate={navigateTo} />;
@@ -98,7 +183,7 @@ function Hub({ onNavigate }) {
             <p className="text-xl text-gray-600 mb-12 text-center">Selecciona una herramienta para empezar a trabajar.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-4xl">
                 <AppCard title="Asistente de Picking" description="Carga el archivo desde QM para tener un resumen de lo que se va a cargar." onClick={() => onNavigate('picking')} icon="📦" />
-                <AppCard title="Recepción de Mercadería" description="Carga el Excel de planta para verificar la mercadería recibida orden por orden." onClick={() => onNavigate('reception')} icon="📋" />
+                <AppCard title="Recepción de Mercadería" description="Importa el Excel de planta para verificar la mercadería recibida desde la base de datos." onClick={() => onNavigate('reception')} icon="📋" />
             </div>
         </div>
     );
@@ -135,7 +220,7 @@ function BackButton({ onNavigate }) {
     );
 }
 
-function FileUpload({ onFileLoad, fileName, id, children }) {
+function FileUpload({ onFileLoad, id, children, disabled }) {
     return (
         <div className="bg-white p-6 rounded-2xl shadow-lg mb-8">
             <label className="block text-lg font-medium text-gray-700 mb-2" htmlFor={id}>
@@ -144,11 +229,14 @@ function FileUpload({ onFileLoad, fileName, id, children }) {
             <input
                 id={id}
                 type="file"
-                onChange={(e) => onFileLoad(e.target.files[0])}
+                onChange={(e) => {
+                    onFileLoad(e.target.files[0]);
+                    e.target.value = null; // Permite recargar el mismo archivo
+                }}
                 accept=".xlsx, .xls"
-                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                disabled={disabled}
+                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:opacity-50"
             />
-            {fileName && <p className="text-sm text-gray-500 mt-2">Archivo cargado: {fileName}</p>}
         </div>
     );
 }
@@ -172,68 +260,48 @@ function DataTable({ headers, data, renderRow }) {
     );
 }
 
-// --- Componente de la Aplicación de Recepción (con persistencia) ---
-function ReceptionApp({ onNavigate, isXlsxReady }) {
+// --- Componente de la Aplicación de Recepción (con Base de Datos) ---
+function ReceptionApp({ onNavigate, isXlsxReady, user }) {
     const [orders, setOrders] = useState([]);
-    const [tickedOrders, setTickedOrders] = useState(new Set());
-    const [isLoading, setIsLoading] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isImporting, setIsImporting] = useState(false);
     const [error, setError] = useState(null);
-    const [fileName, setFileName] = useState('');
 
-    // Efecto para cargar los datos desde localStorage al iniciar
     useEffect(() => {
-        try {
-            const savedOrders = localStorage.getItem('reception_orders');
-            const savedTicked = localStorage.getItem('reception_tickedOrders');
-            const savedFileName = localStorage.getItem('reception_fileName');
-
-            if (savedOrders) {
-                setOrders(JSON.parse(savedOrders));
-            }
-            if (savedTicked) {
-                setTickedOrders(new Set(JSON.parse(savedTicked)));
-            }
-            if (savedFileName) {
-                setFileName(savedFileName);
-            }
-        } catch (err) {
-            console.error("Error al cargar datos desde localStorage", err);
-            setError("No se pudo cargar la sesión anterior.");
-        }
-    }, []);
-
-    // Efecto para guardar las órdenes y el nombre del archivo cuando cambian
-    useEffect(() => {
-        try {
-            localStorage.setItem('reception_orders', JSON.stringify(orders));
-            localStorage.setItem('reception_fileName', fileName);
-        } catch (err) {
-            console.error("Error al guardar órdenes en localStorage", err);
-        }
-    }, [orders, fileName]);
-
-    // Efecto para guardar las órdenes tildadas cuando cambian
-    useEffect(() => {
-        try {
-            localStorage.setItem('reception_tickedOrders', JSON.stringify(Array.from(tickedOrders)));
-        } catch (err) {
-            console.error("Error al guardar tildes en localStorage", err);
-        }
-    }, [tickedOrders]);
-
-    const handleFileLoad = (file) => {
-        if (!file) return;
-        if (!isXlsxReady) {
-            setError("La librería de Excel no está lista. Inténtalo de nuevo en un momento.");
-            return;
-        }
-
+        if (!user) return;
+        
         setIsLoading(true);
+        const ordersCollection = collection(db, 'users', user.uid, 'receptionOrders');
+        const q = query(ordersCollection);
+
+        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+            const ordersData = querySnapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            })).sort((a, b) => {
+                const numA = parseInt(a.nroOrden, 10);
+                const numB = parseInt(b.nroOrden, 10);
+                return !isNaN(numA) && !isNaN(numB) ? numA - numB : String(a.nroOrden).localeCompare(String(b.nroOrden));
+            });
+            setOrders(ordersData);
+            setIsLoading(false);
+        }, (err) => {
+            console.error("Error al leer desde Firestore:", err);
+            setError("No se pudieron cargar las órdenes desde la base de datos.");
+            setIsLoading(false);
+        });
+
+        return () => unsubscribe();
+    }, [user]);
+
+    const handleFileImport = async (file) => {
+        if (!file || !isXlsxReady || !user) return;
+
+        setIsImporting(true);
         setError(null);
-        setFileName(file.name);
 
         const reader = new FileReader();
-        reader.onload = (e) => {
+        reader.onload = async (e) => {
             try {
                 const data = new Uint8Array(e.target.result);
                 const workbook = window.XLSX.read(data, { type: 'array' });
@@ -241,39 +309,41 @@ function ReceptionApp({ onNavigate, isXlsxReady }) {
                 const worksheet = workbook.Sheets[sheetName];
                 const json = window.XLSX.utils.sheet_to_json(worksheet);
 
-                const mappedOrders = json.map((row, index) => ({
-                    id: row['Nro Orden'] ? `${row['Nro Orden']}-${index}` : `no-id-${index}`,
-                    nroOrden: row['Nro Orden'] || 'N/A',
-                    producto: row['Producto'] || 'N/A',
-                    cliente: row['Cliente'] || 'N/A',
-                    zona: row['Zona'] || 'N/A',
-                })).sort((a, b) => {
-                    const numA = parseInt(a.nroOrden, 10);
-                    const numB = parseInt(b.nroOrden, 10);
-                    return !isNaN(numA) && !isNaN(numB) ? numA - numB : String(a.nroOrden).localeCompare(String(b.nroOrden));
+                const batch = writeBatch(db);
+                const ordersCollection = collection(db, 'users', user.uid, 'receptionOrders');
+
+                json.forEach(row => {
+                    const newOrder = {
+                        nroOrden: row['Nro Orden'] || 'N/A',
+                        producto: row['Producto'] || 'N/A',
+                        cliente: row['Cliente'] || 'N/A',
+                        zona: row['Zona'] || 'N/A',
+                        recibido: false
+                    };
+                    const docRef = doc(ordersCollection);
+                    batch.set(docRef, newOrder);
                 });
 
-                setOrders(mappedOrders);
-                setTickedOrders(new Set()); // Reset ticks on new file
+                await batch.commit();
             } catch (err) {
+                console.error("Error al importar el archivo:", err);
                 setError(`Error al procesar el archivo: ${err.message}`);
             } finally {
-                setIsLoading(false);
+                setIsImporting(false);
             }
-        };
-        reader.onerror = () => {
-            setError('No se pudo leer el archivo.');
-            setIsLoading(false);
         };
         reader.readAsArrayBuffer(file);
     };
 
-    const handleTickToggle = (orderId) => {
-        setTickedOrders(prev => {
-            const newTicked = new Set(prev);
-            newTicked.has(orderId) ? newTicked.delete(orderId) : newTicked.add(orderId);
-            return newTicked;
-        });
+    const handleTickToggle = async (orderId, currentStatus) => {
+        if (!user) return;
+        const docRef = doc(db, 'users', user.uid, 'receptionOrders', orderId);
+        try {
+            await updateDoc(docRef, { recibido: !currentStatus });
+        } catch (err) {
+            console.error("Error al actualizar la orden:", err);
+            setError("No se pudo actualizar el estado de la orden.");
+        }
     };
     
     const handleExport = () => {
@@ -283,7 +353,7 @@ function ReceptionApp({ onNavigate, isXlsxReady }) {
         }
 
         const dataToExport = orders.map(order => ({
-            'Estado': tickedOrders.has(order.id) ? 'Recibido' : 'Pendiente',
+            'Estado': order.recibido ? 'Recibido' : 'Pendiente',
             'Nro Orden': order.nroOrden,
             'Producto': order.producto,
             'Cliente': order.cliente,
@@ -308,33 +378,43 @@ function ReceptionApp({ onNavigate, isXlsxReady }) {
         window.XLSX.writeFile(wb, "recepcion_verificada.xlsx");
     };
 
-    const handleClearSession = () => {
-        localStorage.removeItem('reception_orders');
-        localStorage.removeItem('reception_tickedOrders');
-        localStorage.removeItem('reception_fileName');
-        setOrders([]);
-        setTickedOrders(new Set());
-        setFileName('');
-        setError(null);
+    const handleClearAllOrders = async () => {
+        if (!user || !window.confirm("¿Estás seguro de que quieres borrar TODAS las órdenes de la base de datos? Esta acción no se puede deshacer.")) {
+            return;
+        }
+        
+        setIsLoading(true);
+        try {
+            const batch = writeBatch(db);
+            orders.forEach(order => {
+                const docRef = doc(db, 'users', user.uid, 'receptionOrders', order.id);
+                batch.delete(docRef);
+            });
+            await batch.commit();
+        } catch (err) {
+            console.error("Error al borrar las órdenes:", err);
+            setError("No se pudieron borrar las órdenes.");
+            setIsLoading(false);
+        }
     };
 
     return (
-        <AppContainer title="Recepción de Mercadería" subtitle="Carga el Excel y tilda cada orden recibida." onNavigate={onNavigate}>
-            <FileUpload onFileLoad={handleFileLoad} fileName={fileName} id="receptionFile">
-                Cargar archivo de recepción
+        <AppContainer title="Recepción de Mercadería" subtitle="Importa un Excel para cargar las órdenes en la base de datos." onNavigate={onNavigate}>
+            <FileUpload onFileLoad={handleFileImport} id="receptionFile" disabled={isImporting}>
+                {isImporting ? "Importando datos..." : "Importar órdenes desde Excel"}
             </FileUpload>
 
-            {isLoading && <p className="p-8 text-center">Cargando datos...</p>}
+            {isLoading && <p className="p-8 text-center">Cargando datos desde la base de datos...</p>}
             {error && <p className="p-8 text-center text-red-500">{error}</p>}
             
             {!isLoading && !error && orders.length > 0 && (
                 <>
                     <DataTable
-                        headers={['Tildar', 'Nro Orden', 'Producto', 'Cliente', 'Zona']}
+                        headers={['Recibido', 'Nro Orden', 'Producto', 'Cliente', 'Zona']}
                         data={orders}
                         renderRow={(order) => (
-                            <tr key={order.id} className={`${tickedOrders.has(order.id) ? 'bg-green-100 text-gray-400 line-through' : ''} transition-colors`}>
-                                <td className="px-6 py-4"><input type="checkbox" checked={tickedOrders.has(order.id)} onChange={() => handleTickToggle(order.id)} className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" /></td>
+                            <tr key={order.id} className={`${order.recibido ? 'bg-green-100 text-gray-400 line-through' : ''} transition-colors`}>
+                                <td className="px-6 py-4"><input type="checkbox" checked={order.recibido} onChange={() => handleTickToggle(order.id, order.recibido)} className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" /></td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">{order.nroOrden}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm">{order.producto}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm">{order.cliente}</td>
@@ -346,13 +426,13 @@ function ReceptionApp({ onNavigate, isXlsxReady }) {
                         <button onClick={handleExport} className="bg-green-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-green-700 transition-colors shadow-md w-full sm:w-auto">
                             Exportar a Excel
                         </button>
-                        <button onClick={handleClearSession} className="bg-red-500 text-white font-bold py-2 px-6 rounded-lg hover:bg-red-600 transition-colors shadow-md w-full sm:w-auto">
-                            Limpiar Recepción
+                        <button onClick={handleClearAllOrders} className="bg-red-500 text-white font-bold py-2 px-6 rounded-lg hover:bg-red-600 transition-colors shadow-md w-full sm:w-auto">
+                            Borrar Todas las Órdenes
                         </button>
                     </div>
                 </>
             )}
-            {!isLoading && !error && orders.length === 0 && <p className="text-center text-gray-500 p-8">No hay datos para mostrar. Carga un archivo para empezar.</p>}
+            {!isLoading && !error && orders.length === 0 && <p className="text-center text-gray-500 p-8">No hay órdenes en la base de datos. Importa un archivo para empezar.</p>}
         </AppContainer>
     );
 }
