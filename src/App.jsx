@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 
 // --- Lógica de Negocio y Utilidades ---
-// Se extrae la lógica de procesamiento para mantener los componentes limpios.
 const pickingUtils = {
     processRepartoGeneral: (datos, config) => {
         const { articulosAExcluir, palabrasAExcluir } = config;
@@ -173,13 +172,54 @@ function DataTable({ headers, data, renderRow }) {
     );
 }
 
-// --- Componente de la Aplicación de Recepción ---
+// --- Componente de la Aplicación de Recepción (con persistencia) ---
 function ReceptionApp({ onNavigate, isXlsxReady }) {
     const [orders, setOrders] = useState([]);
     const [tickedOrders, setTickedOrders] = useState(new Set());
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
     const [fileName, setFileName] = useState('');
+
+    // Efecto para cargar los datos desde localStorage al iniciar
+    useEffect(() => {
+        try {
+            const savedOrders = localStorage.getItem('reception_orders');
+            const savedTicked = localStorage.getItem('reception_tickedOrders');
+            const savedFileName = localStorage.getItem('reception_fileName');
+
+            if (savedOrders) {
+                setOrders(JSON.parse(savedOrders));
+            }
+            if (savedTicked) {
+                setTickedOrders(new Set(JSON.parse(savedTicked)));
+            }
+            if (savedFileName) {
+                setFileName(savedFileName);
+            }
+        } catch (err) {
+            console.error("Error al cargar datos desde localStorage", err);
+            setError("No se pudo cargar la sesión anterior.");
+        }
+    }, []);
+
+    // Efecto para guardar las órdenes y el nombre del archivo cuando cambian
+    useEffect(() => {
+        try {
+            localStorage.setItem('reception_orders', JSON.stringify(orders));
+            localStorage.setItem('reception_fileName', fileName);
+        } catch (err) {
+            console.error("Error al guardar órdenes en localStorage", err);
+        }
+    }, [orders, fileName]);
+
+    // Efecto para guardar las órdenes tildadas cuando cambian
+    useEffect(() => {
+        try {
+            localStorage.setItem('reception_tickedOrders', JSON.stringify(Array.from(tickedOrders)));
+        } catch (err) {
+            console.error("Error al guardar tildes en localStorage", err);
+        }
+    }, [tickedOrders]);
 
     const handleFileLoad = (file) => {
         if (!file) return;
@@ -214,7 +254,7 @@ function ReceptionApp({ onNavigate, isXlsxReady }) {
                 });
 
                 setOrders(mappedOrders);
-                setTickedOrders(new Set());
+                setTickedOrders(new Set()); // Reset ticks on new file
             } catch (err) {
                 setError(`Error al procesar el archivo: ${err.message}`);
             } finally {
@@ -268,6 +308,16 @@ function ReceptionApp({ onNavigate, isXlsxReady }) {
         window.XLSX.writeFile(wb, "recepcion_verificada.xlsx");
     };
 
+    const handleClearSession = () => {
+        localStorage.removeItem('reception_orders');
+        localStorage.removeItem('reception_tickedOrders');
+        localStorage.removeItem('reception_fileName');
+        setOrders([]);
+        setTickedOrders(new Set());
+        setFileName('');
+        setError(null);
+    };
+
     return (
         <AppContainer title="Recepción de Mercadería" subtitle="Carga el Excel y tilda cada orden recibida." onNavigate={onNavigate}>
             <FileUpload onFileLoad={handleFileLoad} fileName={fileName} id="receptionFile">
@@ -292,9 +342,12 @@ function ReceptionApp({ onNavigate, isXlsxReady }) {
                             </tr>
                         )}
                     />
-                    <div className="mt-8 text-center">
-                        <button onClick={handleExport} className="bg-green-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-green-700 transition-colors shadow-md">
+                    <div className="mt-8 flex flex-col sm:flex-row justify-center items-center gap-4">
+                        <button onClick={handleExport} className="bg-green-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-green-700 transition-colors shadow-md w-full sm:w-auto">
                             Exportar a Excel
+                        </button>
+                        <button onClick={handleClearSession} className="bg-red-500 text-white font-bold py-2 px-6 rounded-lg hover:bg-red-600 transition-colors shadow-md w-full sm:w-auto">
+                            Limpiar Recepción
                         </button>
                     </div>
                 </>
