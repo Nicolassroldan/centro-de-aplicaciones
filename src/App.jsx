@@ -218,7 +218,7 @@ function FileUpload({ onFileLoad, id, children, disabled }) {
     );
 }
 
-// --- APP RECEPCIÓN (CONTADOR FIJO, BUSCADOR SCROLLEABLE) ---
+// --- APP RECEPCIÓN FINAL (Nombre de archivo corregido) ---
 function ReceptionApp({ onNavigate, isXlsxReady, user }) {
     const [orders, setOrders] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -230,6 +230,7 @@ function ReceptionApp({ onNavigate, isXlsxReady, user }) {
         const q = query(collection(db, 'users', user.uid, 'receptionOrders'));
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+            // Ordenamos numéricamente
             data.sort((a, b) => (parseInt(a.nroOrden) || 0) - (parseInt(b.nroOrden) || 0));
             setOrders(data);
             setIsLoading(false);
@@ -239,7 +240,11 @@ function ReceptionApp({ onNavigate, isXlsxReady, user }) {
 
     const filteredOrders = useMemo(() => {
         const term = searchTerm.toLowerCase();
-        return orders.filter(o => String(o.nroOrden).toLowerCase().includes(term) || String(o.producto).toLowerCase().includes(term) || String(o.cliente).toLowerCase().includes(term));
+        return orders.filter(o => 
+            String(o.nroOrden).toLowerCase().includes(term) || 
+            String(o.producto).toLowerCase().includes(term) || 
+            String(o.cliente).toLowerCase().includes(term)
+        );
     }, [orders, searchTerm]);
 
     const handleImport = (file) => {
@@ -265,6 +270,41 @@ function ReceptionApp({ onNavigate, isXlsxReady, user }) {
         reader.readAsArrayBuffer(file);
     };
 
+    // --- FUNCIÓN EXPORTAR (NOMBRE ACTUALIZADO) ---
+    const handleExport = () => {
+        if (!isXlsxReady) return alert("El sistema de Excel aún no está listo.");
+        
+        if (orders.length === 0) {
+            return alert("No hay datos para exportar.");
+        }
+
+        const dataExport = orders.map(o => ({
+            'Nro Orden': o.nroOrden,
+            'Producto': o.producto,
+            'Cliente': o.cliente,
+            'Zona': o.zona || '-',
+            'Estado': o.recibido ? 'RECIBIDO' : 'PENDIENTE'
+        }));
+
+        const ws = window.XLSX.utils.json_to_sheet(dataExport);
+        
+        const wscols = [
+            {wch: 10}, 
+            {wch: 40}, 
+            {wch: 30}, 
+            {wch: 10}, 
+            {wch: 15} 
+        ];
+        ws['!cols'] = wscols;
+
+        const wb = window.XLSX.utils.book_new();
+        window.XLSX.utils.book_append_sheet(wb, ws, "Recepción");
+
+        // CAMBIO AQUÍ: Nombre del archivo como solicitaste
+        const fecha = new Date().toLocaleDateString('es-AR').replace(/\//g, '-');
+        window.XLSX.writeFile(wb, `Recepción_${fecha}.xlsx`);
+    };
+
     const toggleStatus = async (id, status) => { try { await updateDoc(doc(db, 'users', user.uid, 'receptionOrders', id), { recibido: !status }); } catch (e) { alert("Error al actualizar"); } };
     const clearAll = async () => { if(confirm("¿Estás seguro de borrar todo?")) { setIsLoading(true); const batch = writeBatch(db); orders.forEach(o => batch.delete(doc(db, 'users', user.uid, 'receptionOrders', o.id))); await batch.commit(); } };
 
@@ -274,7 +314,6 @@ function ReceptionApp({ onNavigate, isXlsxReady, user }) {
             
             {isLoading ? <p className="text-center p-8">Sincronizando...</p> : (
                 <>
-                    {/* STICKY HEADER: SOLO CONTADOR */}
                     <div className="sticky top-0 z-20 bg-gray-100 pt-2 pb-4">
                         <div className="bg-white p-4 rounded-2xl shadow-lg text-center border border-gray-100">
                             <h3 className="text-lg font-medium text-gray-600">Progreso</h3>
@@ -288,7 +327,6 @@ function ReceptionApp({ onNavigate, isXlsxReady, user }) {
                         </div>
                     </div>
 
-                    {/* BUSCADOR SCROLLEABLE */}
                     <input 
                         className="w-full px-4 py-3 bg-white rounded-2xl shadow-lg focus:ring-2 focus:ring-blue-500 outline-none border border-gray-100 mb-8" 
                         placeholder="Buscar por Orden, Producto o Cliente..." 
@@ -298,12 +336,54 @@ function ReceptionApp({ onNavigate, isXlsxReady, user }) {
 
                     <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
                         <table className="min-w-full divide-y divide-gray-200">
-                            <thead className="bg-gray-50"><tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Estado</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Orden</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cliente</th></tr></thead>
-                            <tbody className="bg-white divide-y divide-gray-200">{filteredOrders.map(o => (<tr key={o.id} className={o.recibido ? 'bg-green-50' : ''}><td className="px-6 py-4"><input type="checkbox" checked={o.recibido} onChange={() => toggleStatus(o.id, o.recibido)} className="h-5 w-5 text-blue-600 rounded cursor-pointer" /></td><td className="px-6 py-4 text-sm font-bold">{o.nroOrden}</td><td className="px-6 py-4 text-sm">{o.producto}</td><td className="px-6 py-4 text-sm text-gray-500">{o.cliente}</td></tr>))}</tbody>
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-10">Ok</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Orden</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Detalle</th>
+                                    <th className="hidden md:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cliente</th>
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {filteredOrders.map(o => (
+                                    <tr key={o.id} className={o.recibido ? 'bg-green-50 transition-colors' : 'transition-colors'}>
+                                        <td className="px-4 py-4">
+                                            <input type="checkbox" checked={o.recibido} onChange={() => toggleStatus(o.id, o.recibido)} className="h-6 w-6 text-blue-600 rounded cursor-pointer" />
+                                        </td>
+                                        <td className="px-4 py-4 text-sm font-bold align-top">
+                                            {o.nroOrden}
+                                        </td>
+                                        <td className="px-4 py-4 align-top">
+                                            <div className="text-sm text-gray-900 font-medium">{o.producto}</div>
+                                            <div className="md:hidden mt-1 text-xs text-gray-500 flex items-center">
+                                                <span className="mr-1">👤</span> {o.cliente}
+                                            </div>
+                                        </td>
+                                        <td className="hidden md:table-cell px-4 py-4 text-sm text-gray-500 align-top">
+                                            {o.cliente}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
                         </table>
                         {filteredOrders.length === 0 && <p className="text-center p-6 text-gray-500">No hay datos.</p>}
                     </div>
-                    <div className="mt-8 flex justify-center"><button onClick={clearAll} className="bg-red-500 text-white font-bold py-2 px-6 rounded-lg hover:bg-red-600 shadow-md">Borrar Todo</button></div>
+                    
+                    <div className="mt-8 flex flex-col md:flex-row justify-center gap-4 pb-8">
+                         <button 
+                            onClick={handleExport} 
+                            className="bg-green-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-green-700 shadow-md flex items-center justify-center gap-2"
+                        >
+                            <span>📊</span> Descargar Reporte
+                        </button>
+                        
+                        <button 
+                            onClick={clearAll} 
+                            className="bg-red-500 text-white font-bold py-3 px-6 rounded-lg hover:bg-red-600 shadow-md"
+                        >
+                            Borrar Todo
+                        </button>
+                    </div>
                 </>
             )}
         </AppContainer>
