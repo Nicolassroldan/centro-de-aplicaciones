@@ -455,7 +455,7 @@ function LogisticsApp({ onNavigate, isXlsxReady }) {
     return (
         <AppContainer title="Consolidado de Deuda" subtitle="Análisis de pedidos y producción requerida." onNavigate={onNavigate}>
             <FileUpload onFileLoad={processFile} id="logFile" disabled={isProcessing}>
-                {isProcessing ? "Procesando..." : "Cargar Informe ZCVEN004 (CSV/Excel)"}
+                {isProcessing ? "Procesando..." : "Cargar informe."}
             </FileUpload>
 
             {routeSheet.length > 0 && (
@@ -511,8 +511,7 @@ function LogisticsApp({ onNavigate, isXlsxReady }) {
                         <div className="bg-white p-6 rounded-2xl shadow-lg">
                             <div className="flex justify-between items-center mb-6">
                                 <div>
-                                    <h3 className="text-xl font-bold text-gray-800">Artículos Críticos (Pedidos Rígidos)</h3>
-                                    <p className="text-gray-500 text-sm">Prioridad de producción para desbloquear facturación.</p>
+                                    <h3 className="text-xl font-bold text-gray-800">Artículos Críticos</h3>
                                 </div>
                                 <button 
                                     onClick={handleExportExcel}
