@@ -6,7 +6,7 @@ import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
 // --- CONFIGURACIÓN DE FIREBASE ---
 const firebaseConfig = {
-  apiKey: "AIzaSyBLjqzXcFGzKqT5PjLSHbFc2fFmt7qY7yA",
+  apiKey: "AIzaSyC8Q6_SCLqi3UUUIeqAiREbzPlAFyRUOik",
   authDomain: "rowa-e0885.firebaseapp.com",
   projectId: "rowa-e0885",
   storageBucket: "rowa-e0885.firebasestorage.app",
