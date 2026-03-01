@@ -283,6 +283,60 @@ const pickingUtils = {
     }
 };
 
+// --- LÓGICA DE NEGOCIO (MANIFIESTOS / YQUADRE2) ---
+const manifestUtils = {
+    processManifest: (dataRaw, config) => {
+        const { articulosDestacados = [], articulosAExcluir = [], palabrasAExcluir = [] } = config;
+        const routes = {};
+
+        dataRaw.forEach(row => {
+            const modelo = String(row['Descripcion'] || '').trim();
+            const modeloUpper = modelo.toUpperCase();
+
+            // Filtro de exclusión (Kits, folletos, etc.)
+            const esExcluido = articulosAExcluir.includes(modelo) || 
+                               palabrasAExcluir.some(p => modeloUpper.includes(p.toUpperCase()));
+            
+            if (esExcluido || modelo === '') return; 
+
+            const rutaNombre = String(row['Ruta'] || 'SIN CLASIFICAR').trim();
+            const cantidad = Number(row['Cantidad']) || 0;
+            const peso = Number(row['Peso']) || 0;
+
+            if (!routes[rutaNombre]) {
+                routes[rutaNombre] = {
+                    nombre: rutaNombre,
+                    acumuladoPeso: 0,
+                    detalleProductos: {}
+                };
+            }
+
+            routes[rutaNombre].acumuladoPeso += peso;
+            routes[rutaNombre].detalleProductos[modelo] = (routes[rutaNombre].detalleProductos[modelo] || 0) + cantidad;
+        });
+
+        return Object.values(routes).map(r => {
+            const productosProcesados = Object.entries(r.detalleProductos)
+                .map(([mod, cant]) => ({
+                    modelo: mod,
+                    cantidad: cant,
+                    esDestacado: articulosDestacados.includes(mod)
+                }))
+                .sort((a, b) => {
+                    if (a.esDestacado && !b.esDestacado) return -1;
+                    if (!a.esDestacado && b.esDestacado) return 1;
+                    return b.cantidad - a.cantidad;
+                });
+
+            return {
+                ...r,
+                productos: productosProcesados,
+                totalUnidades: productosProcesados.reduce((acc, p) => acc + p.cantidad, 0)
+            };
+        }).sort((a, b) => b.acumuladoPeso - a.acumuladoPeso);
+    }
+};
+
 // --- COMPONENTE PRINCIPAL ---
 function App() {
     const [currentView, setCurrentView] = useState('hub');
@@ -314,6 +368,7 @@ function App() {
             case 'picking': return <PickingApp onNavigate={setCurrentView} isXlsxReady={isXlsxReady} />;
             case 'reception': return <ReceptionApp onNavigate={setCurrentView} isXlsxReady={isXlsxReady} user={user} />;
             case 'logistics': return <LogisticsApp onNavigate={setCurrentView} isXlsxReady={isXlsxReady} />;
+            case 'manifest': return <ManifestApp onNavigate={setCurrentView} isXlsxReady={isXlsxReady} />;
             default: return <Hub onNavigate={setCurrentView} />;
         }
     };
@@ -328,10 +383,16 @@ function Hub({ onNavigate }) {
         <div className="flex flex-col items-center justify-center min-h-screen p-4">
             <h1 className="text-5xl font-bold text-gray-800 mb-4 text-center">¿Qué quieres hacer?</h1>
             <p className="text-xl text-gray-600 mb-12 text-center">Selecciona una herramienta para empezar a trabajar.</p>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 w-full max-w-6xl">
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 w-full max-w-6xl">
                 <AppCard title="Asistente de Picking" description="Resumen de carga por chofer desde QM." onClick={() => onNavigate('picking')} icon="📦" />
                 <AppCard title="Recepción de Mercadería" description="Control de ingresos vs Excel de planta." onClick={() => onNavigate('reception')} icon="📋" />
                 <AppCard title="Consolidado de Deuda" description="Análisis de pedidos y producción requerida." onClick={() => onNavigate('logistics')} icon="📊" />
+                <AppCard 
+                    title="Picking a la tarde" 
+                    description="Análisis de rutas y pesos." 
+                    onClick={() => onNavigate('manifest')} 
+                    icon="🚚" 
+                />
             </div>
         </div>
     );
@@ -560,6 +621,149 @@ function LogisticsApp({ onNavigate, isXlsxReady }) {
     );
 }
 
+function ManifestApp({ onNavigate, isXlsxReady }) {
+    const [summary, setSummary] = useState([]);
+    const [isProcessing, setIsProcessing] = useState(false);
+
+    const config = useMemo(() => ({
+        articulosDestacados: [
+            'PRESURIZADOR TANGO SFL 9 220V T2 AR', 
+            'PRESURIZADOR TANGO SFL 14 220V T2 AR', 
+            'PRESURIZADOR TANGO SFL 20 220V T2 AR', 
+            'PRESURIZADOR TANGO PRESS 20 220V T2 AR',
+            'ELECTROBOMBA ELEVADORA INTELIGENT 20 220V AR',
+            'ELECTROBOMBA ELEVADORA INTELIGENT 24 220V AR'
+        ],
+        articulosAExcluir: ['AUTORIZACION DE RETIRO POR CUENTA Y ORDEN DE ROWA S.A.'],
+        palabrasAExcluir: [
+            'KIT', 'CONJ', 'DISCO', 'TURBINA', 'CAPACITOR', 'MODULO', 'BOBINADO', 'TAPON', 'PLAQUETA', 'SENSOR', 'LIQUIDO', 'CONTROL AUTOMATICO', 'REP', 'CATALOGO', 'VALV.', 'PORTA FOLLETOS', 'FLEXIBLE','TUBO', 'FLETES', 'REMERA', 'BUJE', 'TAPA', 'DISTANCIADOR', 'ROTOR', 'BL. MOTOR', 'JERINGA', 'DUCHA', 'DIAFRAGMA', "O'RING", 'CAJA','REMERA','MEMBRETE'
+        ]
+    }), []);
+
+    const handleFile = (file) => {
+        if (!isXlsxReady) return;
+        setIsProcessing(true);
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const wb = window.XLSX.read(e.target.result, { type: 'array' });
+                let json = window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+                if (typeof normalizeKeys === 'function') json = normalizeKeys(json);
+                const finalData = manifestUtils.processManifest(json, config);
+                setSummary(finalData);
+            } catch (err) {
+                alert("Error al procesar el archivo.");
+            } finally {
+                setIsProcessing(false);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    };
+
+    // --- NUEVA FUNCIÓN DE EXPORTACIÓN ---
+    const handleExportExcel = () => {
+        if (!summary || summary.length === 0) return alert("No hay datos para exportar");
+
+        const wb = window.XLSX.utils.book_new();
+
+        summary.forEach(zona => {
+            // Preparamos los datos de la hoja
+            const tableData = zona.productos.map(p => ({
+                "Modelo": p.modelo,
+                "Cantidad": p.cantidad
+            }));
+
+            // Agregamos un pequeño resumen al final de cada hoja
+            tableData.push({}); // Fila vacía
+            tableData.push({ "Modelo": "--- RESUMEN DE ZONA ---", "Cantidad": "" });
+            tableData.push({ "Modelo": "TOTAL UNIDADES", "Cantidad": zona.totalUnidades });
+            tableData.push({ "Modelo": "PESO TOTAL (kg)", "Cantidad": zona.acumuladoPeso });
+
+            const ws = window.XLSX.utils.json_to_sheet(tableData);
+
+            // Ajuste de ancho de columnas para que se vea pro
+            ws['!cols'] = [{ wch: 50 }, { wch: 15 }];
+
+            // IMPORTANTE: Excel no permite nombres de hojas de más de 31 caracteres
+            // ni ciertos caracteres especiales. Limpiamos el nombre:
+            let sheetName = zona.nombre.substring(0, 31).replace(/[:\\/?*[\]]/g, "_");
+
+            window.XLSX.utils.book_append_sheet(wb, ws, sheetName);
+        });
+
+        // Descargar el archivo
+        const fecha = new Date().toLocaleDateString('es-AR').replace(/\//g, '-');
+        window.XLSX.writeFile(wb, `Planilla_Carga_${fecha}.xlsx`);
+    };
+
+    return (
+        <AppContainer title="Picking a la tarde" subtitle="Análisis de carga por zona." onNavigate={onNavigate}>
+            <div className="flex flex-col md:flex-row gap-4 items-center mb-8">
+                <div className="flex-grow w-full">
+                    <FileUpload onFileLoad={handleFile} id="manFile" disabled={isProcessing}>
+                        {isProcessing ? "Procesando..." : "1. Subir Excel"}
+                    </FileUpload>
+                </div>
+                {summary.length > 0 && (
+                    <button 
+                        onClick={handleExportExcel}
+                        className="w-full md:w-auto bg-green-600 hover:bg-green-700 text-white font-bold py-8 px-8 rounded-2xl shadow-lg transition-all flex flex-col items-center justify-center gap-2"
+                    >
+                        <span className="text-3xl">📥</span>
+                        2. Descargar Excel por Zonas
+                    </button>
+                )}
+            </div>
+
+            {summary.length > 0 && (
+                <div className="bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
+                    <table className="min-w-full text-left">
+                        <thead className="bg-gray-50 text-gray-400 text-xs uppercase font-bold">
+                            <tr>
+                                <th className="px-6 py-4">Zona / Artículos</th>
+                                <th className="px-6 py-4 text-center">Total Unidades</th>
+                                <th className="px-6 py-4 text-right">Peso Total</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                            {summary.map((zona, i) => (
+                                <tr key={i} className="align-top hover:bg-gray-50">
+                                    <td className="px-6 py-4">
+                                        <details className="group">
+                                            <summary className="font-bold text-blue-700 cursor-pointer flex items-center gap-2">
+                                                <span className="group-open:rotate-90 transition-transform">▶</span>
+                                                {zona.nombre}
+                                            </summary>
+                                            <div className="mt-3 ml-6 bg-gray-50 p-2 rounded-lg border border-gray-200">
+                                                <ul className="space-y-1">
+                                                    {zona.productos.map((p, idx) => (
+                                                        <li key={idx} className={`flex justify-between text-sm py-1 px-3 rounded mb-1 ${p.esDestacado ? 'bg-indigo-100 text-indigo-900 font-bold border-l-4 border-indigo-500' : 'border-b last:border-0 border-gray-100'}`}>
+                                                            <span>{p.modelo}</span>
+                                                            <span className={`font-mono font-bold ${p.esDestacado ? 'text-indigo-900' : 'text-blue-600'}`}>
+                                                                {p.cantidad}
+                                                            </span>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        </details>
+                                    </td>
+                                    <td className="px-6 py-4 text-center font-bold text-gray-700 text-lg">
+                                        {zona.totalUnidades}
+                                    </td>
+                                    <td className="px-6 py-4 text-right font-mono font-black text-blue-600">
+                                        {zona.acumuladoPeso.toLocaleString()} kg
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </AppContainer>
+    );
+}
+
 // --- APP RECEPCIÓN (EXISTENTE) ---
 function ReceptionApp({ onNavigate, isXlsxReady, user }) {
     const [orders, setOrders] = useState([]);
@@ -699,7 +903,7 @@ function PickingApp({ onNavigate, isXlsxReady }) {
     const config = useMemo(() => ({
         articulosDestacados: ['PRESURIZADOR TANGO SFL 9 220V T2 AR', 'PRESURIZADOR TANGO SFL 14 220V T2 AR', 'PRESURIZADOR TANGO SFL 20 220V T2 AR', 'PRESURIZADOR TANGO PRESS 20 220V T2 AR','ELECTROBOMBA ELEVADORA INTELIGENT 20 220V AR','ELECTROBOMBA ELEVADORA INTELIGENT 24 220V AR'],
         articulosAExcluir: ['AUTORIZACION DE RETIRO POR CUENTA Y ORDEN DE ROWA S.A.'],
-        palabrasAExcluir: ['KIT', 'CONJ', 'DISCO', 'TURBINA', 'CAPACITOR', 'MODULO', 'BOBINADO', 'TAPON', 'PLAQUETA', 'SENSOR', 'LIQUIDO', 'CONTROL AUTOMATICO', 'REP', 'CATALOGO', 'VALV.', 'PORTA FOLLETOS', 'FLEXIBLE']
+        palabrasAExcluir: ['KIT', 'CONJ', 'DISCO', 'TURBINA', 'CAPACITOR', 'MODULO', 'BOBINADO', 'TAPON', 'PLAQUETA', 'SENSOR', 'LIQUIDO', 'CONTROL AUTOMATICO', 'REP', 'CATALOGO', 'VALV.', 'PORTA FOLLETOS', 'FLEXIBLE','TUBO', 'FLETES', 'REMERA', 'BUJE', 'TAPA', 'DISTANCIADOR', 'ROTOR', 'BL. MOTOR', 'JERINGA', 'DUCHA', 'DIAFRAGMA', "O'RING", 'CAJA','REMERA','MEMBRETE']
     }), []);
 
     const process = (f) => {
@@ -739,6 +943,8 @@ function PickingApp({ onNavigate, isXlsxReady }) {
         </AppContainer>
     );
 }
+
+
 
 // --- VISTA GENÉRICA ORDENADA ---
 const GenericView = ({ data, type, highlights = [] }) => {
