@@ -57,6 +57,28 @@ const commitBatchInChunks = async (db, collectionRef, dataArray) => {
     }
 };
 
+// --- INTERCEPTOR DE DATOS CORRUPTOS (EXCEL DATE FIX) ---
+const fixExcelDate = (art) => {
+    if (!art) return '';
+    let s = String(art).toLowerCase().trim();
+    // Diccionario de conversión de meses (Español e Inglés)
+    const map = { 
+        ene:'01', feb:'02', mar:'03', abr:'04', may:'05', jun:'06', 
+        jul:'07', ago:'08', sep:'09', oct:'10', nov:'11', dic:'12', 
+        jan:'01', apr:'04', aug:'08', dec:'12' 
+    };
+    
+    // Captura patrón: "18-may" o "18-may."
+    let m1 = s.match(/^(\d{1,2})-([a-z]{3})\.?$/);
+    if (m1 && map[m1[2]]) return `${m1[1].padStart(2, '0')}-${map[m1[2]]}`;
+
+    // Captura patrón: "may-18" o "may.-18"
+    let m2 = s.match(/^([a-z]{3})\.?-(\d{1,2})$/);
+    if (m2 && map[m2[1]]) return `${map[m2[1]]}-${m2[2].padStart(2, '0')}`; 
+
+    return String(art).toUpperCase().trim();
+};
+
 // --- LÓGICA DE NEGOCIO (LOGÍSTICA / FIFO) ---
 const logisticsUtils = {
     CLIENTES_PARCIALES: new Set([
@@ -89,6 +111,9 @@ const logisticsUtils = {
                 const [day, month, year] = fechaStr.split('/');
                 const fechaObj = new Date(`${year}-${month}-${day}`); 
 
+                // Aplicamos la reparación del artículo aquí
+                const articuloCorregido = fixExcelDate(row['Articulo']);
+
                 return {
                     ...row,
                     _terceroClean: terceroClean,
@@ -96,7 +121,7 @@ const logisticsUtils = {
                     _fechaObj: fechaObj,
                     _fechaStr: fechaStr,
                     _pedidoId: row['Pedido'],
-                    _articulo: row['Articulo'],
+                    _articulo: articuloCorregido,
                     _descripcion: row['Descripcion'],
                     _pendiente: Number(row['Pendiente'] || 0),
                     _stockRealCalculado: Number(row['Disponible'] || 0)
@@ -234,7 +259,7 @@ const logisticsUtils = {
             }
         });
 
-        // 5. REPORTE FILTRADO Y LIMPIO (SOLO DEUDA)
+        // 5. REPORTE FILTRADO Y LIMPIO
         const liberationData = Object.entries(articleStats).map(([art, stats]) => {
             const stockSobrante = inventario[art] || 0; 
             
@@ -252,7 +277,7 @@ const logisticsUtils = {
                 cantidadPedidos: stats.pedidosBloqueados.size,
                 pedidos: Array.from(stats.pedidosBloqueados).join(', ')
             };
-        }).filter(row => row.aProducir > 0 || row.deudaTotal > 0) // <--- Filtro estricto: Si no hay deuda, no sale en la tabla
+        }).filter(row => row.aProducir > 0 || row.deudaTotal > 0)
           .sort((a, b) => b.deudaTotal - a.deudaTotal || b.aProducir - a.aProducir);
 
         return { routeSheet: resultadosHojaRuta, liberationData, kpis };
@@ -447,8 +472,8 @@ function LogisticsApp({ onNavigate, isXlsxReady }) {
         const dataToExport = liberationData.map(row => ({
             "Artículo": row.articulo,
             "Descripción": row.descripcion,
-            "Falta Producir (Pedidos Interior)": row.aProducir,
-            "Deuda Total (Interior + Local)": row.deudaTotal,
+            "Falta Producir (Pedidos Rígidos)": row.aProducir,
+            "Deuda Total (Rígida + Parcial)": row.deudaTotal,
             "Pedidos Trabados": row.cantidadPedidos,
             "Detalle Pedidos": row.pedidos
         }));
@@ -457,7 +482,6 @@ function LogisticsApp({ onNavigate, isXlsxReady }) {
         const wb = window.XLSX.utils.book_new();
         window.XLSX.utils.book_append_sheet(wb, ws, "Consolidado");
 
-        // Ajustamos anchos al quitar la columna
         const wscols = [{wch: 15}, {wch: 40}, {wch: 32}, {wch: 30}, {wch: 15}, {wch: 50}];
         ws['!cols'] = wscols;
 
@@ -476,7 +500,7 @@ function LogisticsApp({ onNavigate, isXlsxReady }) {
     return (
         <AppContainer title="Consolidado de Deuda" subtitle="Análisis de pedidos y producción requerida." onNavigate={onNavigate}>
             <FileUpload onFileLoad={processFile} id="logFile" disabled={isProcessing}>
-                {isProcessing ? "Procesando..." : "Importar excel"}
+                {isProcessing ? "Procesando..." : "Cargar Informe ZCVEN004 (CSV/Excel)"}
             </FileUpload>
 
             {routeSheet.length > 0 && (
@@ -485,18 +509,18 @@ function LogisticsApp({ onNavigate, isXlsxReady }) {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                             <div className="bg-white p-6 rounded-2xl shadow border-l-4 border-blue-500">
                                 <h4 className="text-gray-500 text-sm font-bold uppercase">Deuda en Condiciones de Salida</h4>
-                                <p className="text-3xl font-extrabold text-blue-700">{kpis.totalUnidadesSalida.toLocaleString()} <span className="text-lg text-gray-500 font-normal">unidades para remitir.</span></p>
+                                <p className="text-3xl font-extrabold text-blue-700">{kpis.totalUnidadesSalida.toLocaleString()} <span className="text-lg text-gray-500 font-normal">unidades fluyendo</span></p>
                             </div>
                             <div className="bg-white p-6 rounded-2xl shadow border-l-4 border-green-500">
-                                <h4 className="text-gray-500 text-sm font-bold uppercase">Pedidos que pueden ser remitidos</h4>
-                                <p className="text-3xl font-extrabold text-green-700">{kpis.pedidosLiberados.toLocaleString()} <span className="text-lg text-gray-500 font-normal">pedidos.</span></p>
+                                <h4 className="text-gray-500 text-sm font-bold uppercase">Pedidos Afectados Positivamente</h4>
+                                <p className="text-3xl font-extrabold text-green-700">{kpis.pedidosLiberados.toLocaleString()} <span className="text-lg text-gray-500 font-normal">pedidos en proceso</span></p>
                             </div>
                         </div>
                     )}
 
                     <div className="flex justify-center mb-6 shadow-sm rounded-lg overflow-hidden">
-                        <button onClick={() => setView('ruta')} className={`px-6 py-3 font-medium border ${view === 'ruta' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'}`}>📋 Hoja de pedidos</button>
-                        <button onClick={() => setView('liberacion')} className={`px-6 py-3 font-medium border ${view === 'liberacion' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'}`}>🔓 Consolidado de deuda</button>
+                        <button onClick={() => setView('ruta')} className={`px-6 py-3 font-medium border ${view === 'ruta' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'}`}>📋 Hoja de Ruta</button>
+                        <button onClick={() => setView('liberacion')} className={`px-6 py-3 font-medium border ${view === 'liberacion' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'}`}>🔓 Consolidado Liberación</button>
                     </div>
 
                     {view === 'ruta' && (
@@ -545,7 +569,7 @@ function LogisticsApp({ onNavigate, isXlsxReady }) {
                         <div className="bg-white p-6 rounded-2xl shadow-lg">
                             <div className="flex justify-between items-center mb-6">
                                 <div>
-                                    <h3 className="text-xl font-bold text-gray-800">Panorama de deuda pendiente</h3>
+                                    <h3 className="text-xl font-bold text-gray-800">Panorama de Deuda Pendiente</h3>
                                     <p className="text-gray-500 text-sm">Resumen de unidades faltantes a producir y demanda total insatisfecha.</p>
                                 </div>
                                 <button 
@@ -731,49 +755,98 @@ function ReceptionApp({ onNavigate, isXlsxReady, user }) {
     );
 }
 
-// --- APP PICKING (EXISTENTE) ---
-function PickingApp({ onNavigate, isXlsxReady }) {
+// --- APP PICKING (ACTUALIZADA CON PERSISTENCIA) ---
+function PickingApp({ onNavigate, isXlsxReady, user }) {
     const [data, setData] = useState([]);
     const [view, setView] = useState('reparto');
-    
+    const [isUploading, setIsUploading] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+
     const config = useMemo(() => ({
         articulosDestacados: ['PRESURIZADOR TANGO SFL 9 220V T2 AR', 'PRESURIZADOR TANGO SFL 14 220V T2 AR', 'PRESURIZADOR TANGO SFL 20 220V T2 AR', 'PRESURIZADOR TANGO PRESS 20 220V T2 AR','ELECTROBOMBA ELEVADORA INTELIGENT 20 220V AR','ELECTROBOMBA ELEVADORA INTELIGENT 24 220V AR'],
         articulosAExcluir: ['AUTORIZACION DE RETIRO POR CUENTA Y ORDEN DE ROWA S.A.'],
         palabrasAExcluir: ['KIT', 'CONJ', 'DISCO', 'TURBINA', 'CAPACITOR', 'MODULO', 'BOBINADO', 'TAPON', 'PLAQUETA', 'SENSOR', 'LIQUIDO', 'CONTROL AUTOMATICO', 'REP', 'CATALOGO', 'VALV.', 'PORTA FOLLETOS', 'FLEXIBLE']
     }), []);
 
-    const process = (f) => {
+    // 1. Escuchar la base de datos (Vista para los chicos)
+    useEffect(() => {
+        const q = query(collection(db, 'pickingData'));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const remoteData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+            setData(remoteData);
+            setIsLoading(false);
+        }, (err) => {
+            console.error("Error en Firebase:", err);
+            setIsLoading(false);
+        });
+        return () => unsubscribe();
+    }, []);
+
+    // 2. Función para borrar y subir (Tu vista de Admin)
+    const handleFileUpload = (f) => {
         if (!isXlsxReady) return;
+        setIsUploading(true);
         const r = new FileReader();
-        r.onload = (e) => {
-            const wb = window.XLSX.read(e.target.result, { type: 'array' });
-            let json = window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-            json = normalizeKeys(json);
-            setData(json);
+        r.onload = async (e) => {
+            try {
+                const wb = window.XLSX.read(e.target.result, { type: 'array' });
+                let json = window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+                json = normalizeKeys(json);
+
+                // Paso A: Borrar datos anteriores para no duplicar
+                const batchDelete = writeBatch(db);
+                data.forEach(item => {
+                    if(item.id) batchDelete.delete(doc(db, 'pickingData', item.id));
+                });
+                await batchDelete.commit();
+
+                // Paso B: Subir los nuevos datos usando tu utilidad existente
+                await commitBatchInChunks(db, collection(db, 'pickingData'), json);
+                
+                alert("¡Datos actualizados para todo el equipo!");
+            } catch (err) {
+                alert("Error al subir: " + err.message);
+            } finally {
+                setIsUploading(false);
+            }
         };
         r.readAsArrayBuffer(f);
     };
 
     const viewContent = useMemo(() => {
-        if(data.length === 0) return null;
+        if (isLoading) return <p className="text-center text-gray-500 py-10">Cargando datos de la nube...</p>;
+        if (data.length === 0) return <p className="text-center text-gray-500 py-10">No hay datos cargados para hoy.</p>;
+        
         if(view==='reparto') return <GenericView data={pickingUtils.processRepartoGeneral(data, config)} type="reparto" highlights={config.articulosDestacados} />;
         if(view==='kits') return <GenericView data={pickingUtils.processKitsYLiquidos(data)} type="kits" />;
         return <GenericView data={pickingUtils.processFlexibles(data)} type="flexibles" />;
-    }, [data, view, config]);
+    }, [data, view, config, isLoading]);
 
     const tabs = [{ id: 'reparto', label: 'Bombas' }, { id: 'kits', label: 'Kits y Reparaciones' }, { id: 'flexibles', label: 'Flexibles' }];
 
     return (
         <AppContainer title="Asistente de Picking" subtitle="Organización inteligente de pedidos." onNavigate={onNavigate}>
-            <FileUpload onFileLoad={process} id="pickFile">Cargar Archivo QM (Picking)</FileUpload>
+            {/* Solo mostramos el cargador si el usuario es quien sube el archivo */}
+            <FileUpload onFileLoad={handleFileUpload} id="pickFile" disabled={isUploading}>
+                {isUploading ? "Actualizando nube..." : "Subir Nuevo Excel QM (Picking)"}
+            </FileUpload>
+
             {data.length > 0 && (
                 <>
                     <div className="flex justify-center mb-6 shadow-sm rounded-lg overflow-hidden">
                         {tabs.map((tab) => (
-                            <button key={tab.id} onClick={() => setView(tab.id)} className={`px-6 py-3 font-medium capitalize border transition-colors ${view === tab.id ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'}`}>{tab.label}</button>
+                            <button 
+                                key={tab.id} 
+                                onClick={() => setView(tab.id)} 
+                                className={`px-6 py-3 font-medium capitalize border transition-colors ${view === tab.id ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
+                            >
+                                {tab.label}
+                            </button>
                         ))}
                     </div>
-                    <div className="bg-white p-6 rounded-2xl shadow-lg min-h-[200px]">{viewContent}</div>
+                    <div className="bg-white p-6 rounded-2xl shadow-lg min-h-[200px] mb-10">
+                        {viewContent}
+                    </div>
                 </>
             )}
         </AppContainer>
