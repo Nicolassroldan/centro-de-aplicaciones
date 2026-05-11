@@ -284,7 +284,6 @@ const logisticsUtils = {
     }
 };
 
-// --- LÓGICA DE NEGOCIO (PICKING) ACTUALIZADA ---
 const pickingUtils = {
     processRepartoGeneral: (datos, config) => {
         const { articulosAExcluir, palabrasAExcluir } = config;
@@ -298,7 +297,6 @@ const pickingUtils = {
                 const cantidad = Number(row['Cantidad a Entregar']) || 0;
                 if (cantidad > 0) {
                     acc[chofer] = acc[chofer] || [];
-                    // Guardamos el objeto completo para no perder el ID ni el estado completado
                     acc[chofer].push({
                         id: row.id,
                         articulo: articulo,
@@ -782,245 +780,138 @@ function PickingApp({ onNavigate, isXlsxReady, user }) {
         palabrasAExcluir: ['KIT', 'CONJ', 'DISCO', 'TURBINA', 'CAPACITOR', 'MODULO', 'BOBINADO', 'TAPON', 'PLAQUETA', 'SENSOR', 'LIQUIDO', 'CONTROL AUTOMATICO', 'REP', 'CATALOGO', 'VALV.', 'PORTA FOLLETOS', 'FLEXIBLE']
     }), []);
 
-    // Escuchar cambios en tiempo real
     useEffect(() => {
         const q = query(collection(db, 'pickingData'));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const remoteData = snapshot.docs.map(d => ({ 
-                id: d.id, // ID de Firebase para poder actualizarlo luego
-                ...d.data() 
-            }));
-            setData(remoteData);
+        const unsubscribe = onSnapshot(q, (sn) => {
+            setData(sn.docs.map(d => ({ id: d.id, ...d.data() })));
             setIsLoading(false);
         });
         return () => unsubscribe();
     }, []);
 
-    // Función para tildar/destildar (se sincroniza con todos)
-    const toggleCheck = async (docId, currentStatus) => {
-        try {
-            const docRef = doc(db, 'pickingData', docId);
-            await updateDoc(docRef, {
-                completado: !currentStatus
-            });
-        } catch (err) {
-            console.error("Error al actualizar estado:", err);
-        }
+    const toggleCheck = async (id, status) => {
+        await updateDoc(doc(db, 'pickingData', id), { completado: !status });
     };
 
-    const handleFileUpload = (f) => {
+    const clearAll = async () => {
+        if (!window.confirm("¿Borrar todos los datos de hoy?")) return;
+        setIsUploading(true);
+        const batch = writeBatch(db);
+        data.forEach(d => batch.delete(doc(db, 'pickingData', d.id)));
+        await batch.commit();
+        setIsUploading(false);
+    };
+
+    const handleUpload = (f) => {
         if (!isXlsxReady) return;
         setIsUploading(true);
         const r = new FileReader();
         r.onload = async (e) => {
-            try {
-                const wb = window.XLSX.read(e.target.result, { type: 'array' });
-                let json = window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-                json = normalizeKeys(json);
-
-                // Paso 1: Limpiar base de datos anterior
-                const batchDelete = writeBatch(db);
-                data.forEach(item => {
-                    if(item.id) batchDelete.delete(doc(db, 'pickingData', item.id));
-                });
-                await batchDelete.commit();
-
-                // Paso 2: Preparar datos con estado "completado: false"
-                const preparedData = json.map(item => ({
-                    ...item,
-                    completado: false,
-                    fechaCarga: new Date().toISOString()
-                }));
-
-                // Paso 3: Subir a Firebase
-                await commitBatchInChunks(db, collection(db, 'pickingData'), preparedData);
-                
-                alert("Excel subido. ¡Los chicos ya pueden verlo!");
-            } catch (err) {
-                alert("Error: " + err.message);
-            } finally {
-                setIsUploading(false);
-            }
+            const wb = window.XLSX.read(e.target.result, { type: 'array' });
+            let json = normalizeKeys(window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]));
+            // Primero borramos lo viejo
+            const batchDel = writeBatch(db);
+            data.forEach(d => batchDel.delete(doc(db, 'pickingData', d.id)));
+            await batchDel.commit();
+            // Subimos lo nuevo
+            await commitBatchInChunks(db, collection(db, 'pickingData'), json.map(j => ({...j, completado: false})));
+            setIsUploading(false);
         };
         r.readAsArrayBuffer(f);
     };
 
-    const viewContent = useMemo(() => {
-        if (isLoading) return <p className="text-center py-10 text-gray-500">Conectando con la nube...</p>;
-        if (data.length === 0) return <p className="text-center py-10 text-gray-500">No hay datos. Subí un Excel para empezar.</p>;
-        
-        let processed;
-        if(view==='reparto') processed = pickingUtils.processRepartoGeneral(data, config);
-        else if(view==='kits') processed = pickingUtils.processKitsYLiquidos(data);
-        else processed = pickingUtils.processFlexibles(data);
-
-        return (
-            <GenericView 
-                data={processed} 
-                type={view} 
-                highlights={config.articulosDestacados}
-                onToggle={toggleCheck} // Pasamos la función de tildado
-            />
-        );
-    }, [data, view, config, isLoading]);
-
     return (
-        <AppContainer title="Asistente de Picking" subtitle="Sincronizado en tiempo real" onNavigate={onNavigate}>
-            <FileUpload onFileLoad={handleFileUpload} id="pickFile" disabled={isUploading}>
-                {isUploading ? "Subiendo datos..." : "Subir Nuevo Excel QM"}
-            </FileUpload>
+        <AppContainer title="Picking Sincronizado" onNavigate={onNavigate}>
+            <div className="flex flex-col gap-4 mb-6">
+                <FileUpload onFileLoad={handleUpload} id="pf" disabled={isUploading}>
+                    {isUploading ? "Cargando..." : "Subir Excel QM"}
+                </FileUpload>
+                {data.length > 0 && (
+                    <button onClick={clearAll} className="p-3 bg-red-50 text-red-600 rounded-xl font-bold border border-red-100">
+                        🗑️ Finalizar y Limpiar Todo
+                    </button>
+                )}
+            </div>
 
-            {data.length > 0 && (
-                <>
-                    <div className="flex justify-center mb-6 shadow-sm rounded-lg overflow-hidden">
-                        {['reparto', 'kits', 'flexibles'].map((tab) => (
-                            <button 
-                                key={tab} 
-                                onClick={() => setView(tab)} 
-                                className={`px-6 py-3 font-medium capitalize border transition-colors ${view === tab ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
-                            >
-                                {tab === 'reparto' ? 'Bombas' : tab}
-                            </button>
-                        ))}
-                    </div>
-                    <div className="bg-white p-4 rounded-2xl shadow-lg min-h-[200px] mb-10">
-                        {viewContent}
-                    </div>
-                </>
-            )}
+            <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
+                {['reparto', 'kits', 'flexibles'].map(t => (
+                    <button key={t} onClick={() => setView(t)} className={`px-4 py-2 rounded-lg capitalize ${view===t ? 'bg-blue-600 text-white' : 'bg-gray-100'}`}>
+                        {t==='reparto' ? 'Bombas' : t}
+                    </button>
+                ))}
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-sm min-h-[100px]">
+                {isLoading ? <p className="p-10 text-center">Cargando...</p> : 
+                 <GenericView 
+                    data={view==='reparto' ? pickingUtils.processRepartoGeneral(data, config) : 
+                          view==='kits' ? pickingUtils.processKitsYLiquidos(data) : 
+                          pickingUtils.processFlexibles(data)} 
+                    type={view} 
+                    highlights={config.articulosDestacados} 
+                    onToggle={toggleCheck} 
+                 />}
+            </div>
         </AppContainer>
     );
 }
 
-// --- VISTA GENÉRICA ACTUALIZADA (CHECKBOX FUNCIONAL) ---
 const GenericView = ({ data, type, highlights = [], onToggle }) => {
-    // Obtenemos los nombres de los Choferes o Categorías y los ordenamos alfabéticamente
     const keys = Object.keys(data).sort();
     
-    if (keys.length === 0) {
-        return (
-            <div className="text-center py-10">
-                <p className="text-gray-500 font-medium text-lg">No hay datos en esta categoría.</p>
-                <p className="text-gray-400 text-sm">Verifica los filtros o sube un nuevo archivo.</p>
-            </div>
-        );
-    }
+    if (keys.length === 0) return <p className="text-center text-gray-500 py-10">No hay datos cargados.</p>;
 
     const isHighlighted = (name) => highlights.includes(name);
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4">
             {keys.map(key => {
-                // 'entries' es el array de artículos para este Chofer/Categoría
                 let entries = [...data[key]]; 
 
-                // Ordenar: 1° Los destacados, 2° Los que NO están completados, 3° Por cantidad mayor
+                // ORDENAMIENTO: Pendientes arriba, completados abajo de todo.
                 entries.sort((a, b) => {
-                    const aName = a.articulo || a.nombre || '';
-                    const bName = b.articulo || b.nombre || '';
-                    
-                    const aHigh = isHighlighted(aName);
-                    const bHigh = isHighlighted(bName);
-                    
-                    // Prioridad 1: Destacados arriba
-                    if (aHigh && !bHigh) return -1;
-                    if (!aHigh && bHigh) return 1;
-                    
-                    // Prioridad 2: No completados arriba
                     if (a.completado && !b.completado) return 1;
                     if (!a.completado && b.completado) return -1;
 
-                    // Prioridad 3: Cantidad
+                    const aName = a.articulo || a.nombre || '';
+                    const bName = b.articulo || b.nombre || '';
+                    if (isHighlighted(aName) && !isHighlighted(bName)) return -1;
+                    if (!isHighlighted(aName) && isHighlighted(bName)) return 1;
+
                     return (b.cantidad || b.cant) - (a.cantidad || a.cant);
-                    });entries.sort((a, b) => {
-                        // PRIORIDAD 1: El estado de carga (Completado vs Pendiente)
-                        // Los pendientes (-1) siempre van arriba de los completados (1)
-                        if (a.completado && !b.completado) return 1;
-                        if (!a.completado && b.completado) return -1;
-
-                        // PRIORIDAD 2: Dentro de los que tienen el mismo estado (ej. todos pendientes),
-                        // ordenamos por importancia (Destacados arriba)
-                        const aName = a.articulo || a.nombre || '';
-                        const bName = b.articulo || b.nombre || '';
-                        const aHigh = isHighlighted(aName);
-                        const bHigh = isHighlighted(bName);
-
-                        if (aHigh && !bHigh) return -1;
-                        if (!aHigh && bHigh) return 1;
-
-                        // PRIORIDAD 3: Por cantidad si todo lo anterior es igual
-                        return (b.cantidad || b.cant) - (a.cantidad || a.cant);
-                    });
+                });
 
                 return (
-                    <details 
-                        key={key} 
-                        className="mb-4 bg-white rounded-xl shadow-sm border border-gray-200 group overflow-hidden" 
-                        open
-                    >
-                        <summary className="px-6 py-4 text-lg font-bold cursor-pointer bg-gray-50 hover:bg-gray-100 flex justify-between items-center transition-colors">
+                    <details key={key} className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+                        <summary className="px-5 py-4 cursor-pointer hover:bg-gray-50 flex justify-between items-center font-bold">
+                            <span className="uppercase tracking-wide text-gray-700">🚚 {key}</span>
                             <div className="flex items-center gap-3">
-                                <span className="text-2xl">🚚</span>
-                                <span className="text-gray-800 uppercase tracking-tight">{key}</span>
-                                <span className="text-xs font-semibold text-blue-600 bg-blue-100 px-2.5 py-1 rounded-full">
-                                    {entries.length} PRODUCTOS
-                                </span>
+                                <span className="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded">{entries.length} ítems</span>
+                                <span className="text-blue-500">▼</span>
                             </div>
-                            <span className="text-gray-400 group-open:rotate-180 transition-transform duration-300">▼</span>
                         </summary>
-                        
-                        <div className="border-t overflow-x-auto">
-                            <table className="min-w-full divide-y divide-gray-200">
-                                <thead className="bg-gray-50">
-                                    <tr className="text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                                        <th className="px-4 py-3 text-center w-20">Cargado</th>
-                                        <th className="px-4 py-3 text-right w-20">Cant.</th>
-                                        <th className="px-4 py-3">Descripción del Producto</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="bg-white divide-y divide-gray-100">
-                                    {entries.map((item) => {
-                                        const nombreProd = item.articulo || item.nombre;
-                                        const destacado = isHighlighted(nombreProd);
-                                        const completado = item.completado || false;
-
-                                        return (
-                                            <tr 
-                                                key={item.id} 
-                                                className={`transition-all duration-200 ${completado ? 'bg-green-50/40' : ''}`}
-                                            >
-                                                {/* Checkbox de Sincronización */}
-                                                <td className="px-4 py-5 text-center">
-                                                    <input 
-                                                        type="checkbox"
-                                                        className="h-8 w-8 rounded-lg border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer shadow-sm transition-transform active:scale-90"
-                                                        checked={completado}
-                                                        onChange={() => onToggle(item.id, completado)}
-                                                    />
-                                                </td>
-
-                                                {/* Cantidad */}
-                                                <td className={`px-4 py-5 text-right font-black text-xl ${completado ? 'text-gray-300 line-through' : 'text-blue-700'}`}>
-                                                    {item.cantidad || item.cant}
-                                                </td>
-
-                                                {/* Descripción */}
-                                                <td className="px-4 py-5">
-                                                    <div className={`font-bold text-sm leading-tight transition-all ${completado ? 'text-gray-300 line-through decoration-1' : 'text-gray-800'}`}>
-                                                        {destacado && !completado && <span className="mr-2 text-indigo-600">★</span>}
-                                                        {nombreProd}
-                                                    </div>
-                                                    
-                                                    {/* Mostrar Razón Social si existe (para Kits/Flexibles) */}
-                                                    {item.razonSocial && (
-                                                        <div className={`text-[11px] mt-1 font-medium ${completado ? 'text-gray-200' : 'text-gray-500'}`}>
-                                                            CLIENTE: {item.razonSocial}
-                                                        </div>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
+                        <div className="border-t">
+                            <table className="min-w-full divide-y divide-gray-100">
+                                <tbody className="divide-y divide-gray-100">
+                                    {entries.map((item) => (
+                                        <tr key={item.id} className={item.completado ? 'bg-green-50/30' : ''}>
+                                            <td className="p-4 w-16 text-center">
+                                                <input 
+                                                    type="checkbox" 
+                                                    className="w-7 h-7 rounded text-blue-600"
+                                                    checked={item.completado}
+                                                    onChange={() => onToggle(item.id, item.completado)}
+                                                />
+                                            </td>
+                                            <td className={`p-4 text-right font-black text-lg w-20 ${item.completado ? 'line-through text-gray-300' : 'text-blue-600'}`}>
+                                                {item.cantidad || item.cant}
+                                            </td>
+                                            <td className={`p-4 ${item.completado ? 'line-through text-gray-300' : 'text-gray-800'}`}>
+                                                <div className="font-bold text-sm">{item.articulo || item.nombre}</div>
+                                                {item.razonSocial && <div className="text-[10px] text-gray-400">{item.razonSocial}</div>}
+                                            </td>
+                                        </tr>
+                                    ))}
                                 </tbody>
                             </table>
                         </div>
