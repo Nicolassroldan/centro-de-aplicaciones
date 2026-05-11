@@ -514,7 +514,7 @@ function LogisticsApp({ onNavigate, isXlsxReady }) {
     return (
         <AppContainer title="Consolidado de Deuda" subtitle="Análisis de pedidos y producción requerida." onNavigate={onNavigate}>
             <FileUpload onFileLoad={processFile} id="logFile" disabled={isProcessing}>
-                {isProcessing ? "Procesando..." : "Cargar Informe ZCVEN004 (CSV/Excel)"}
+                {isProcessing ? "Procesando..." : "Cargar Informe"}
             </FileUpload>
 
             {routeSheet.length > 0 && (
