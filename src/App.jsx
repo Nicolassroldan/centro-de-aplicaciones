@@ -296,13 +296,14 @@ const pickingUtils = {
                 const chofer = row['Chofer'] || 'Sin Chofer Asignado';
                 const cantidad = Number(row['Cantidad a Entregar']) || 0;
                 if (cantidad > 0) {
-                    acc[chofer] = acc[chofer] || [];
-                    acc[chofer].push({
-                        id: row.id,
-                        articulo: articulo,
-                        cantidad: cantidad,
-                        completado: row.completado || false
-                    });
+                    acc[chofer] = acc[chofer] || {};
+                    if (!acc[chofer][articulo]) {
+                        acc[chofer][articulo] = { ids: [], cantidad: 0, completado: true };
+                    }
+                    acc[chofer][articulo].ids.push(row.id);
+                    acc[chofer][articulo].cantidad += cantidad;
+                    // Si al menos uno de los items agrupados no está completado, el grupo se marca como pendiente
+                    if (!row.completado) acc[chofer][articulo].completado = false;
                 }
             }
             return acc;
@@ -318,10 +319,10 @@ const pickingUtils = {
                 if (cantidad > 0) {
                     acc[chofer] = acc[chofer] || [];
                     acc[chofer].push({ 
-                        id: row.id,
+                        id: [row.id], // Lo ponemos en array para que la función toggle sea universal
                         razonSocial: row['Razon Social'], 
                         articulo: articuloActual, 
-                        cantidad,
+                        cantidad, 
                         completado: row.completado || false 
                     });
                 }
@@ -337,11 +338,11 @@ const pickingUtils = {
                 const cantidad = Number(row['Cantidad a Entregar']) || 0;
                 if (cantidad > 0) {
                     acc[chofer] = acc[chofer] || [];
-                    acc[chofer].push({
-                        id: row.id,
-                        nombre: articuloActual,
-                        cantidad,
-                        completado: row.completado || false
+                    acc[chofer].push({ 
+                        id: [row.id], 
+                        articulo: articuloActual, 
+                        cantidad, 
+                        completado: row.completado || false 
                     });
                 }
             }
@@ -768,7 +769,7 @@ function ReceptionApp({ onNavigate, isXlsxReady, user }) {
     );
 }
 
-function PickingApp({ onNavigate, isXlsxReady, user }) {
+function PickingApp({ onNavigate, isXlsxReady }) {
     const [data, setData] = useState([]);
     const [view, setView] = useState('reparto');
     const [isUploading, setIsUploading] = useState(false);
@@ -789,8 +790,11 @@ function PickingApp({ onNavigate, isXlsxReady, user }) {
         return () => unsubscribe();
     }, []);
 
-    const toggleCheck = async (id, status) => {
-        await updateDoc(doc(db, 'pickingData', id), { completado: !status });
+    // Actualiza todos los IDs que pertenecen a una fila agrupada
+    const toggleCheck = async (ids, status) => {
+        const batch = writeBatch(db);
+        ids.forEach(id => batch.update(doc(db, 'pickingData', id), { completado: !status }));
+        await batch.commit();
     };
 
     const clearAll = async () => {
@@ -809,11 +813,9 @@ function PickingApp({ onNavigate, isXlsxReady, user }) {
         r.onload = async (e) => {
             const wb = window.XLSX.read(e.target.result, { type: 'array' });
             let json = normalizeKeys(window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]));
-            // Primero borramos lo viejo
             const batchDel = writeBatch(db);
             data.forEach(d => batchDel.delete(doc(db, 'pickingData', d.id)));
             await batchDel.commit();
-            // Subimos lo nuevo
             await commitBatchInChunks(db, collection(db, 'pickingData'), json.map(j => ({...j, completado: false})));
             setIsUploading(false);
         };
@@ -821,27 +823,27 @@ function PickingApp({ onNavigate, isXlsxReady, user }) {
     };
 
     return (
-        <AppContainer title="Picking Sincronizado" onNavigate={onNavigate}>
-            <div className="flex flex-col gap-4 mb-6">
+        <AppContainer title="Asistente de Picking" onNavigate={onNavigate}>
+            <div className="flex flex-col md:flex-row gap-4 mb-6">
                 <FileUpload onFileLoad={handleUpload} id="pf" disabled={isUploading}>
                     {isUploading ? "Cargando..." : "Subir Excel QM"}
                 </FileUpload>
                 {data.length > 0 && (
-                    <button onClick={clearAll} className="p-3 bg-red-50 text-red-600 rounded-xl font-bold border border-red-100">
-                        🗑️ Finalizar y Limpiar Todo
+                    <button onClick={clearAll} className="p-3 bg-red-50 text-red-600 rounded-xl font-bold border border-red-100 hover:bg-red-100">
+                        🗑️ Finalizar Jornada (Limpiar Todo)
                     </button>
                 )}
             </div>
 
-            <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
+            <div className="flex gap-2 mb-6 overflow-x-auto">
                 {['reparto', 'kits', 'flexibles'].map(t => (
-                    <button key={t} onClick={() => setView(t)} className={`px-4 py-2 rounded-lg capitalize ${view===t ? 'bg-blue-600 text-white' : 'bg-gray-100'}`}>
-                        {t==='reparto' ? 'Bombas' : t}
+                    <button key={t} onClick={() => setView(t)} className={`px-5 py-2 rounded-xl font-bold whitespace-nowrap ${view===t ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                        {t==='reparto' ? 'Bombas' : t.toUpperCase()}
                     </button>
                 ))}
             </div>
 
-            <div className="bg-white rounded-2xl shadow-sm min-h-[100px]">
+            <div className="bg-white rounded-2xl shadow-sm">
                 {isLoading ? <p className="p-10 text-center">Cargando...</p> : 
                  <GenericView 
                     data={view==='reparto' ? pickingUtils.processRepartoGeneral(data, config) : 
@@ -858,33 +860,33 @@ function PickingApp({ onNavigate, isXlsxReady, user }) {
 
 const GenericView = ({ data, type, highlights = [], onToggle }) => {
     const keys = Object.keys(data).sort();
-    
-    if (keys.length === 0) return <p className="text-center text-gray-500 py-10">No hay datos cargados.</p>;
+    if (keys.length === 0) return <p className="text-center text-gray-500 py-10">No hay datos.</p>;
 
     const isHighlighted = (name) => highlights.includes(name);
 
     return (
         <div className="space-y-4">
             {keys.map(key => {
-                let entries = [...data[key]]; 
+                // Adaptamos la data agrupada o plana a un formato común
+                let entries = type === 'reparto' 
+                    ? Object.entries(data[key]).map(([name, info]) => ({ id: info.ids, articulo: name, cantidad: info.cantidad, completado: info.completado }))
+                    : [...data[key]];
 
-                // ORDENAMIENTO: Pendientes arriba, completados abajo de todo.
+                // Orden: Pendientes arriba, y dentro de eso, Destacados arriba.
                 entries.sort((a, b) => {
                     if (a.completado && !b.completado) return 1;
                     if (!a.completado && b.completado) return -1;
-
-                    const aName = a.articulo || a.nombre || '';
-                    const bName = b.articulo || b.nombre || '';
-                    if (isHighlighted(aName) && !isHighlighted(bName)) return -1;
-                    if (!isHighlighted(aName) && isHighlighted(bName)) return 1;
-
-                    return (b.cantidad || b.cant) - (a.cantidad || a.cant);
+                    const aHigh = isHighlighted(a.articulo || a.nombre);
+                    const bHigh = isHighlighted(b.articulo || b.nombre);
+                    if (aHigh && !bHigh) return -1;
+                    if (!aHigh && bHigh) return 1;
+                    return (b.cantidad || 0) - (a.cantidad || 0);
                 });
 
                 return (
                     <details key={key} className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
                         <summary className="px-5 py-4 cursor-pointer hover:bg-gray-50 flex justify-between items-center font-bold">
-                            <span className="uppercase tracking-wide text-gray-700">🚚 {key}</span>
+                            <span className="uppercase text-gray-700">🚚 {key}</span>
                             <div className="flex items-center gap-3">
                                 <span className="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded">{entries.length} ítems</span>
                                 <span className="text-blue-500">▼</span>
@@ -892,19 +894,19 @@ const GenericView = ({ data, type, highlights = [], onToggle }) => {
                         </summary>
                         <div className="border-t">
                             <table className="min-w-full divide-y divide-gray-100">
-                                <tbody className="divide-y divide-gray-100">
-                                    {entries.map((item) => (
-                                        <tr key={item.id} className={item.completado ? 'bg-green-50/30' : ''}>
+                                <tbody>
+                                    {entries.map((item, idx) => (
+                                        <tr key={idx} className={item.completado ? 'bg-green-50/30' : ''}>
                                             <td className="p-4 w-16 text-center">
                                                 <input 
                                                     type="checkbox" 
-                                                    className="w-7 h-7 rounded text-blue-600"
+                                                    className="w-8 h-8 rounded text-blue-600"
                                                     checked={item.completado}
                                                     onChange={() => onToggle(item.id, item.completado)}
                                                 />
                                             </td>
-                                            <td className={`p-4 text-right font-black text-lg w-20 ${item.completado ? 'line-through text-gray-300' : 'text-blue-600'}`}>
-                                                {item.cantidad || item.cant}
+                                            <td className={`p-4 text-right font-black text-xl w-20 ${item.completado ? 'line-through text-gray-300' : 'text-blue-600'}`}>
+                                                {item.cantidad}
                                             </td>
                                             <td className={`p-4 ${item.completado ? 'line-through text-gray-300' : 'text-gray-800'}`}>
                                                 <div className="font-bold text-sm">{item.articulo || item.nombre}</div>
