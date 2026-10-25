@@ -270,6 +270,20 @@ const zk=z=>String(z||"").toUpperCase().replace(/^ZONA\s+/,"").replace(/\s+/g," 
 const zTit=z=>{const k=zk(z);return k.charAt(0)+k.slice(1).toLowerCase()};
 function proxHabilFecha(){const d=new Date();do{d.setDate(d.getDate()+1)}while(d.getDay()===0||d.getDay()===6);return d}
 function proxHabil(){return proxHabilFecha().getDay()}
+const isoF=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+const hoyISO=()=>isoF(new Date());
+const fechaCorta=iso=>iso?iso.split("-").reverse().slice(0,2).join("/"):"";
+// El armado es para una fecha concreta. Se mantiene mientras esa fecha sea hoy o futura
+// (así a la mañana se sigue viendo el armado del día); cuando ya pasó, arranca solo el del próximo día hábil.
+function normalizarDia(guardar){
+  const prox=isoF(proxHabilFecha());
+  if(!S.paraFecha){S.paraFecha=prox}
+  else if(S.paraFecha<hoyISO()){const antes=S.paraFecha;S.paraFecha=prox;
+    const habia=S.fletes.length;S.fletes=[];S.asig={};S.nuevos={};
+    if(habia)ui.notice=`El armado del ${fechaCorta(antes)} ya pasó: empezó el del ${DIAS[new Date(prox+"T12:00").getDay()]} ${fechaCorta(prox)}. Los remitos que sigan en el archivo de no planificados vuelven a "Sin asignar" con su fecha de pedido original.`;
+    if(guardar)markDirty()}
+  S.dia=new Date(S.paraFecha+"T12:00").getDay();
+}
 const zonasDia=d=>(AGENDA[d]||[]).concat(SIEMPRE);
 const enDia=(z,d=S.dia)=>zonasDia(d).includes(zk(z));
 function proximaSalida(z){const k=zk(z);for(let i=1;i<=5;i++){const d=((S.dia-1+i)%5)+1;if(zonasDia(d).includes(k))return DIAS[d]}return "sin día asignado"}
@@ -428,7 +442,7 @@ async function onFiles(files){
 }
 
 // ---------- persistencia ----------
-function snapshotPlan(){return {problemas:S.problemas||{},fletes:S.fletes,asig:S.asig,nuevos:S.nuevos,base:S.base,clientesInfo:S.clientesInfo,dia:S.dia,actualizado:ultimoLocal||new Date().toISOString()}}
+function snapshotPlan(){return {paraFecha:S.paraFecha,problemas:S.problemas||{},fletes:S.fletes,asig:S.asig,nuevos:S.nuevos,base:S.base,clientesInfo:S.clientesInfo,dia:S.dia,actualizado:ultimoLocal||new Date().toISOString()}}
 function lsSave(){try{localStorage.setItem(LS,JSON.stringify(S))}catch(e){}}
 let ultimoLocal="";
 function markDirty(){dirtyPlan=true;ultimoLocal=new Date().toISOString();lsSave();setSaved("Guardando…");clearTimeout(markDirty.t);markDirty.t=setTimeout(flushPlan,700)}
@@ -664,7 +678,7 @@ function renderInner(){
   const totKg=R.reduce((a,r)=>a+r.kg,0),libKg=libres.reduce((a,r)=>a+r.kg,0);
   const viejos=gl.filter(g=>g.maxDias>=3).length;void totKg;
   let html=`<div class="strip">
-    <div class="cell"><span class="k">Planificando</span><span class="v">${esc(DIAS[S.dia])} ${proxHabilFecha().toLocaleDateString("es-AR",{day:"2-digit",month:"2-digit"})}</span></div>
+    <div class="cell"><span class="k">Planificando</span><span class="v">${esc(DIAS[S.dia])} ${fechaCorta(S.paraFecha)}</span>${S.paraFecha<=hoyISO()?(ui.confirmDia?`<span class="confirm">Se limpian los fletes de hoy. <button class="btn small primary" data-act="diaok">Pasar al ${esc(DIAS[proxHabil()])}</button><button class="btn small" data-act="diano">Cancelar</button></span>`:`<button class="link" data-act="dia">Ya planifiqué hoy: pasar al ${esc(DIAS[proxHabil()])} ${fechaCorta(isoF(proxHabilFecha()))}</button>`):""}</div>
     <div class="cell"><span class="k">Zonas del día</span><span style="font-size:13px;font-weight:600;max-width:34ch">${zonasDia(S.dia).map(zTit).join(", ")}</span></div>
     <div class="cell"><span class="k">Remitos del día</span><span class="v">${delDia.length} · ${fmtKg(diaKg)} kg</span></div>
     <div class="cell"><span class="k">Sin asignar del día</span><span class="v">${libres.length} rem · ${fmtKg(libKg)} kg</span></div>
@@ -723,6 +737,9 @@ function toast(t){if(EMB){try{if(window.parent.rowaPreplanToast){window.parent.r
 document.addEventListener("click",e=>{
   const b=e.target.closest("[data-act]");if(!b)return;const a=b.dataset.act;
   if(a==="pt"){const k=b.dataset.k;if(b.dataset.free==="1"){ui.sel.has(k)?ui.sel.delete(k):ui.sel.add(k);render()}else{toast(b.dataset.info)}return}
+  if(a==="dia"){ui.confirmDia=true;render();return}
+  if(a==="diano"){ui.confirmDia=false;render();return}
+  if(a==="diaok"){ui.confirmDia=false;S.paraFecha=isoF(proxHabilFecha());S.fletes=[];S.asig={};S.nuevos={};S.dia=new Date(S.paraFecha+"T12:00").getDay();ui.sugG=null;ui.notice=`Armado del ${DIAS[S.dia]} ${fechaCorta(S.paraFecha)}: los remitos que no salieron siguen en "Sin asignar" con su fecha de pedido original.`;markDirty();render();return}
   if(a==="tab"){ui.tab=b.dataset.t;render();return}
   if(a==="probopen"){ui.probForm=ui.probForm&&ui.probForm.k===b.dataset.k?null:{k:b.dataset.k};render();return}
   if(a==="probno"){ui.probForm=null;render();return}
@@ -755,7 +772,7 @@ document.addEventListener("click",e=>{
   else if(a==="delok"){const id=b.dataset.f;S.fletes=S.fletes.filter(f=>f.id!==id);for(const c in S.asig)if(S.asig[c]===id)delete S.asig[c];ui.confirmDel=null;markDirty();render()}
   else if(a==="reset"){ui.confirmReset=true;render()}
   else if(a==="resetno"){ui.confirmReset=false;render()}
-  else if(a==="resetok"){S={remitos:[],cargado:null,fletes:[],asig:{},nuevos:{},base:S.base||BASE0,clientesInfo:S.clientesInfo,dia:proxHabil(),problemas:S.problemas||{}};ui.confirmReset=false;ui.sel.clear();ui.undo=null;saveRemitos();markDirty();render()}
+  else if(a==="resetok"){S={remitos:[],cargado:null,fletes:[],asig:{},nuevos:{},base:S.base||BASE0,clientesInfo:S.clientesInfo,paraFecha:S.paraFecha,dia:S.dia,problemas:S.problemas||{}};ui.confirmReset=false;ui.sel.clear();ui.undo=null;saveRemitos();markDirty();render()}
   else if(a==="closenotice"){ui.notice=null;ui.undo=null;render()}
 });
 document.addEventListener("change",e=>{
@@ -823,7 +840,7 @@ $("#exportBtn").onclick=exportar;
 // ---------- arranque ----------
 try{const c=localStorage.getItem(LS+"-cli");if(c)CLI=JSON.parse(c)}catch(e){}
 try{const raw=localStorage.getItem(LS);if(raw){const o=JSON.parse(raw);if(o&&Array.isArray(o.remitos))S=Object.assign(S,o)}}catch(e){}
-S.dia=proxHabil();
+normalizarDia(false);
 render();setSaved("");
 (async()=>{
   try{downloads=window.claude?await window.claude.use("downloads"):null}catch(e){}
@@ -832,7 +849,7 @@ render();setSaved("");
   if(!db&&!window.claude){try{db=(window.parent!==window&&window.parent.rowaPreplanStore)||null}catch(e){db=null}}
   if(!db){setSaved("Guardado en este navegador");return}
   db.doc("pre/remitos").onSnapshot(s=>{if(s.exists){const d=cp(s.data());S.remitos=d.lista||[];S.cargado=d.cargado||null;lsSave();render()}},e=>{console.error(e);setSaved("Sin conexión con la nube: se guarda en este navegador")});
-  db.doc("pre/plan").onSnapshot(s=>{if(dirtyPlan||saving)return;if(s.exists){const d=cp(s.data());if(ultimoLocal&&(!d.actualizado||d.actualizado<ultimoLocal))return;S.fletes=d.fletes||[];S.asig=d.asig||{};S.nuevos=d.nuevos||{};S.base=d.base||BASE0;S.problemas=d.problemas||{};S.dia=proxHabil();S.clientesInfo=d.clientesInfo||null;lsSave();render();setSaved("Guardado")}},()=>{});
+  db.doc("pre/plan").onSnapshot(s=>{if(dirtyPlan||saving)return;if(s.exists){const d=cp(s.data());if(ultimoLocal&&(!d.actualizado||d.actualizado<ultimoLocal))return;S.fletes=d.fletes||[];S.asig=d.asig||{};S.nuevos=d.nuevos||{};S.base=d.base||BASE0;S.problemas=d.problemas||{};S.paraFecha=d.paraFecha||S.paraFecha;normalizarDia(true);S.clientesInfo=d.clientesInfo||null;lsSave();render();setSaved("Guardado")}},()=>{});
 })();
 })();
 </script>
