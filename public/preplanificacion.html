@@ -156,6 +156,43 @@ h1{margin:0;font-size:24px;font-weight:800;letter-spacing:-.01em;text-wrap:balan
 .sugbox label{font-size:13px;display:inline-flex;gap:6px;align-items:center}
 .sugbox input[type=number]{width:90px;border:1px solid var(--line);border-radius:4px;padding:4px 6px;background:var(--sunk);font-family:var(--font-num)}
 .sugbox p{margin:0;font-size:12px;color:var(--muted);max-width:75ch}
+.tabs{display:flex;gap:4px;flex-wrap:wrap}
+.tab{border:1px solid var(--line);background:var(--sunk);color:var(--muted);border-radius:var(--r);padding:6px 10px;font-weight:700;font-size:14px}
+.tab.on{background:var(--accent);border-color:var(--accent);color:var(--panel)}
+.tab .num{font-size:12px;opacity:.85}
+.warnlink{color:var(--bad)!important;opacity:.75;font-size:11px}
+.warnlink:hover{opacity:1}
+.probform{grid-column:1 / 4;display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:var(--bad-soft);border-radius:var(--r);padding:6px 8px;margin-top:4px;font-size:12px;cursor:auto}
+.probform select,.probform input{border:1px solid var(--line);border-radius:4px;padding:3px 6px;background:var(--panel);font-size:12px;min-width:0}
+.probform input{flex:1 1 140px}
+.parada.prob{background:var(--panel)}
+/* ===== estilo del sitio Facturación y despacho (cuando la página está embebida) ===== */
+html.rowa{--bg:#f3f4f6;--panel:#ffffff;--sunk:#f9fafb;--line:#e5e7eb;--fg:#1f2937;--muted:#6b7280;--accent:#2563eb;--accent-soft:#eff6ff;--warn:#b45309;--warn-soft:#fef3c7;--bad:#dc2626;--bad-soft:#fee2e2;--ok:#16a34a;--paper:#ffffff;
+  --f1:#2563eb;--f2:#7c3aed;--f3:#16a34a;--f4:#ea580c;--f5:#db2777;--f6:#0891b2;--f7:#ca8a04;--f8:#4f46e5;
+  --font-ui:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;--font-num:var(--font-ui);--r:8px;color-scheme:light}
+html.rowa body{background:transparent;color:var(--fg)}
+html.rowa .wrap{padding:0 0 24px;max-width:none;gap:24px}
+html.rowa header.top{justify-content:flex-end}
+html.rowa header.top h1{display:none}
+html.rowa header.top>div:first-child{margin-right:auto}
+html.rowa .strip,html.rowa .panel,html.rowa .mapwrap,html.rowa .empty,html.rowa .sugbox,html.rowa .flete{border:none;border-radius:16px;box-shadow:0 10px 15px -3px rgb(0 0 0 / .1),0 4px 6px -4px rgb(0 0 0 / .1)}
+html.rowa .flete{border-top:4px solid var(--fc)}
+html.rowa .strip{padding:16px 24px}
+html.rowa .notice{border-radius:12px;background:var(--accent-soft);color:#1e40af;font-weight:600}
+html.rowa .empty{border:2px dashed #d1d5db;box-shadow:0 10px 15px -3px rgb(0 0 0 / .1)}
+html.rowa .btn{border-radius:8px;padding:8px 16px;background:#fff;border:1px solid var(--line);box-shadow:0 1px 3px rgb(0 0 0 / .1);font-weight:600}
+html.rowa .btn:hover{background:#e5e7eb;border-color:var(--line)}
+html.rowa .btn.primary,html.rowa .tab.on{background:#2563eb;border-color:#2563eb;color:#fff}
+html.rowa .btn.primary:hover{background:#1d4ed8}
+html.rowa #exportBtn{background:#16a34a;border-color:#16a34a;color:#fff;font-weight:700}
+html.rowa #exportBtn:hover{background:#15803d}
+html.rowa .btn.small{padding:3px 10px}
+html.rowa .tab{border-radius:12px;padding:8px 16px;border:none;background:#f3f4f6;color:#6b7280}
+html.rowa .pool{max-height:640px}
+html.rowa .mapsvg{max-height:520px}
+html.rowa .parada{background:#fff}
+html.rowa .parada:hover{background:#f9fafb}
+html.rowa .toast{position:sticky}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--panel);padding:9px 14px;border-radius:var(--r);font-size:13px;z-index:20;max-width:calc(100% - 32px)}
 .saved{font-size:12px;color:var(--muted)}
 .confirm{display:flex;gap:6px;align-items:center;font-size:12px;flex-wrap:wrap}
@@ -186,11 +223,19 @@ h1{margin:0;font-size:24px;font-weight:800;letter-spacing:-.01em;text-wrap:balan
 <script>
 (function(){
 "use strict";
+// Dentro del sitio "Facturación y despacho" la página toma el estilo del sitio y se acomoda a su contenedor
+const EMB=(()=>{try{return window.parent!==window&&!!window.parent.rowaPreplanStore}catch(e){return false}})();
+if(EMB){document.documentElement.classList.add("rowa");document.documentElement.setAttribute("data-theme","light");
+  const rep=()=>{try{window.parent.rowaPreplanResize&&window.parent.rowaPreplanResize(Math.ceil(document.documentElement.scrollHeight))}catch(e){}};
+  try{new ResizeObserver(rep).observe(document.body)}catch(e){setInterval(rep,1000)}window.addEventListener("load",rep);}
+function scrollArriba(){if(EMB){try{window.parent.rowaPreplanScrollTop&&window.parent.rowaPreplanScrollTop();return}catch(e){}}window.scrollTo({top:0,behavior:"smooth"})}
 // ---------- estado ----------
 const BASE0={nombre:"Rowa Escobar",lat:-34.3555,lng:-58.7650};
-let S={remitos:[],cargado:null,fletes:[],asig:{},nuevos:{},base:BASE0,clientesInfo:null,dia:null};
+let S={remitos:[],cargado:null,fletes:[],asig:{},nuevos:{},base:BASE0,clientesInfo:null,dia:null,problemas:{}};
+const MOTIVOS=["Sin stock","Falta factura o documentación","Cliente no recibe / cerrado","Dirección o datos incorrectos","Bloqueado por cobranzas","Otro"];
+const prob=r=>!!(S.problemas&&S.problemas[r.c]);
 let CLI=null; // maestro de clientes: [[domNorm,nombreNorm,numero,lat,lng]]
-let ui={verOtras:false,sug:false,sugG:null,sugC:null,capG:1000,capC:500,sugModo:"libres",undo:null,q:"",zona:"",orden:"zona",mapa:true,soloNuevos:false,sel:new Set(),open:new Set(),confirmDel:null,confirmReset:false,notice:null};
+let ui={tab:"libres",probForm:null,verOtras:false,sug:false,sugG:null,sugC:null,capG:1000,capC:500,sugModo:"libres",undo:null,q:"",zona:"",orden:"zona",mapa:true,soloNuevos:false,sel:new Set(),open:new Set(),confirmDel:null,confirmReset:false,notice:null};
 let db=null, downloads=null, dirtyPlan=false, saving=false, pendingSave=false;
 const LS="preplan-fletes-v1";
 const FC=["--f1","--f2","--f3","--f4","--f5","--f6","--f7","--f8"];
@@ -361,6 +406,7 @@ async function onFiles(files){
   if(res){
     const prev=new Set(S.remitos.map(r=>r.c)),now=new Set(res.map(r=>r.c));
     let salieron=0;for(const c of Object.keys(S.asig))if(!now.has(c)){delete S.asig[c];salieron++}
+    S.problemas=S.problemas||{};for(const c of Object.keys(S.problemas))if(!now.has(c))delete S.problemas[c];
     const nuevos={};let auto=0;
     const fleteDeParada={};for(const r of S.remitos)if(S.asig[r.c]&&now.has(r.c))fleteDeParada[paradaKey(r)]=S.asig[r.c];
     if(prev.size)for(const r of res)if(!prev.has(r.c)){nuevos[r.c]=1;const fl=fleteDeParada[paradaKey(r)];if(fl){S.asig[r.c]=fl;auto++}}
@@ -382,7 +428,7 @@ async function onFiles(files){
 }
 
 // ---------- persistencia ----------
-function snapshotPlan(){return {fletes:S.fletes,asig:S.asig,nuevos:S.nuevos,base:S.base,clientesInfo:S.clientesInfo,dia:S.dia,actualizado:ultimoLocal||new Date().toISOString()}}
+function snapshotPlan(){return {problemas:S.problemas||{},fletes:S.fletes,asig:S.asig,nuevos:S.nuevos,base:S.base,clientesInfo:S.clientesInfo,dia:S.dia,actualizado:ultimoLocal||new Date().toISOString()}}
 function lsSave(){try{localStorage.setItem(LS,JSON.stringify(S))}catch(e){}}
 let ultimoLocal="";
 function markDirty(){dirtyPlan=true;ultimoLocal=new Date().toISOString();lsSave();setSaved("Guardando…");clearTimeout(markDirty.t);markDirty.t=setTimeout(flushPlan,700)}
@@ -420,14 +466,26 @@ function paradaHTML(g,opts){
   const age=g.maxDias>=6?`<span class="tag veryold" title="Días hábiles desde el pedido">${g.maxDias} días háb.</span>`:g.maxDias>=3?`<span class="tag old" title="Días hábiles desde el pedido">${g.maxDias} días háb.</span>`:`<span class="tag" title="Días hábiles desde el pedido">${g.maxDias} d háb.</span>`;
   const isOpen=ui.open.has(g.k+(opts.fl||""));
   let exp="";
-  if(isOpen){exp=`<div class="expand">${g.rs.map(r=>{const [a,b]=codeParts(r.c);return `<div class="rem"><div class="rowx"><span class="code">${esc(a)}<small>_${esc(b)}</small></span><span class="num">${fmtKg(r.kg)} kg · ${esc(r.f.split("-").reverse().join("/"))}</span></div><div>${esc(r.cl)} · <span style="color:var(--muted)">${esc(r.t)}</span>${S.nuevos[r.c]?' <span class="tag new">nuevo</span>':""}</div>${r.it&&r.it.length?`<ul>${r.it.map(i=>`<li>${esc(i[2])} × ${esc(i[1])} <span class="num">(${esc(i[0])})</span></li>`).join("")}</ul>`:""}${opts.fl?`<button class="link" data-act="unone" data-c="${esc(r.c)}">Devolver este remito a sin asignar</button>`:""}</div>`}).join("")}</div>`}
+  if(isOpen){exp=`<div class="expand">${g.rs.map(r=>{const [a,b]=codeParts(r.c);return `<div class="rem"><div class="rowx"><span class="code">${esc(a)}<small>_${esc(b)}</small></span><span class="num">${fmtKg(r.kg)} kg · ${esc(r.f.split("-").reverse().join("/"))}</span></div><div>${esc(r.cl)} · <span style="color:var(--muted)">${esc(r.t)}</span>${S.nuevos[r.c]?' <span class="tag new">nuevo</span>':""}</div>${r.it&&r.it.length?`<ul>${r.it.map(i=>`<li>${esc(i[2])} × ${esc(i[1])} <span class="num">(${esc(i[0])})</span></li>`).join("")}</ul>`:""}<div style="display:flex;gap:12px;flex-wrap:wrap">${opts.fl?`<button class="link" data-act="unone" data-c="${esc(r.c)}">Devolver este remito a sin asignar</button>`:""}<button class="link warnlink" data-act="probopen" data-k="${esc("r:"+r.c)}">Marcar este remito con problema</button></div>${ui.probForm&&ui.probForm.k==="r:"+r.c?probFormHTML([r.c]):""}</div>`}).join("")}</div>`}
   return `<div class="parada" draggable="true" data-codes="${ids}" data-k="${esc(g.k+(opts.fl||""))}">
     ${opts.fl?`<span class="ord">${opts.n}</span>`:`<input type="checkbox" aria-label="Seleccionar parada" data-sel="${esc(g.k)}" ${ui.sel.has(g.k)?"checked":""}>`}
     <span class="who">${who}</span>
     <span class="kg">${fmtKg(g.kg)} kg${opts.fl?` <button class="x" title="Devolver a sin asignar" data-act="unassign" data-codes="${ids}">×</button>`:""}</span>
     <span class="where">${esc(g.loc)} · ${esc(g.d.split(",")[0])}</span>
-    <span class="tags">${g.ll?`<span class="tag" title="Distancia aproximada desde ${esc(S.base.nombre)}">≈${Math.round(g.km)} km</span>`:(S.clientesInfo||CLI?`<span class="tag nogeo" title="No se encontró en el listado de clientes">sin ubicación</span>`:"")}${g.rs.length>1?`<span class="tag multi">${g.rs.length} remitos</span>`:`<span class="tag">1 remito</span>`}${opts.fl||opts.showZ?`<span class="tag">${esc(g.z.replace(/^ZONA /,""))}</span>`:""}${age}${g.nuevo?'<span class="tag new">nuevo</span>':""}<button class="link" data-act="toggle" data-k="${esc(g.k+(opts.fl||""))}">${isOpen?"ocultar":"ver remitos"}</button></span>
+    <span class="tags">${g.ll?`<span class="tag" title="Distancia aproximada desde ${esc(S.base.nombre)}">≈${Math.round(g.km)} km</span>`:(S.clientesInfo||CLI?`<span class="tag nogeo" title="No se encontró en el listado de clientes">sin ubicación</span>`:"")}${g.rs.length>1?`<span class="tag multi">${g.rs.length} remitos</span>`:`<span class="tag">1 remito</span>`}${opts.fl||opts.showZ?`<span class="tag">${esc(g.z.replace(/^ZONA /,""))}</span>`:""}${age}${g.nuevo?'<span class="tag new">nuevo</span>':""}<button class="link" data-act="toggle" data-k="${esc(g.k+(opts.fl||""))}">${isOpen?"ocultar":"ver remitos"}</button><button class="link warnlink" data-act="probopen" data-k="${esc("p:"+g.k+(opts.fl||""))}" title="Marcar con problema: sale de las propuestas hasta que se resuelva">⚠ problema</button></span>
+    ${ui.probForm&&ui.probForm.k==="p:"+g.k+(opts.fl||"")?probFormHTML(g.codes):""}
     ${exp}</div>`;
+}
+function probFormHTML(codes){
+  return `<div class="probform" data-codes="${esc(codes.join("|"))}"><label for="probM">Motivo</label><select id="probM">${MOTIVOS.map(m=>`<option>${esc(m)}</option>`).join("")}</select>
+    <input id="probN" placeholder="Detalle (opcional)" maxlength="120"><button class="btn small danger" data-act="probok">Marcar ${codes.length>1?codes.length+" remitos":"remito"}</button><button class="btn small" data-act="probno">Cancelar</button></div>`;
+}
+function problemasHTML(list){
+  if(!list.length)return `<div class="empty-drop">No hay remitos marcados con problemas. Usá “marcar problema” en una parada para sacarla de las propuestas hasta que se resuelva.</div>`;
+  return list.slice().sort((a,b)=>(S.problemas[b.c].f||"").localeCompare(S.problemas[a.c].f||"")).map(r=>{const p=S.problemas[r.c];const [a,b]=codeParts(r.c);
+    return `<div class="parada prob" style="cursor:auto"><span class="ord">⚠</span><span class="who">${esc(r.cl)}</span><span class="kg">${fmtKg(r.kg)} kg</span>
+    <span class="where">${esc(localidad(r.d))} · ${esc(zTit(r.z))} · <span class="num">${esc(a)}<small>_${esc(b)}</small></span></span>
+    <span class="tags"><span class="tag veryold">${esc(p.m)}</span>${p.n?`<span class="tag">${esc(p.n)}</span>`:""}<span class="tag">desde ${esc(new Date(p.f).toLocaleDateString("es-AR",{day:"2-digit",month:"2-digit"}))}</span><button class="link" data-act="probquitar" data-c="${esc(r.c)}">Resuelto: volver a sin asignar</button></span></div>`}).join("");
 }
 function fleteOptions(sel){return `<option value="">Mover a…</option>`+S.fletes.map(f=>`<option value="${f.id}">${esc(f.nombre)}</option>`).join("")}
 
@@ -478,15 +536,15 @@ function mejorarZona(rs,lim){
   for(let i=rs.length-1;i>=0;i--)if(!rs[i].gs.length)rs.splice(i,1);
 }
 function necesidadDia(capG){
-  const libresR=S.remitos.filter(r=>!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c]));
-  const porZ={};for(const r of S.remitos)if(enDia(r.z)){const k=zk(r.z);(porZ[k]=porZ[k]||{kg:0,libre:0});porZ[k].kg+=r.kg}
+  const libresR=S.remitos.filter(r=>!prob(r)&&(!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c])));
+  const porZ={};for(const r of S.remitos)if(enDia(r.z)&&!prob(r)){const k=zk(r.z);(porZ[k]=porZ[k]||{kg:0,libre:0});porZ[k].kg+=r.kg}
   for(const r of libresR)if(enDia(r.z))porZ[zk(r.z)].libre+=r.kg;
   return porZ;
 }
 function sugerir(nG,capG,nC,capC,modo){
   S.fletes=S.fletes.filter(f=>S.remitos.some(r=>S.asig[r.c]===f.id)); // los fletes vacíos no ocupan camión
   if(modo==="todo"){S.asig={};S.fletes=[]}
-  const libresR=S.remitos.filter(r=>(!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c]))&&enDia(r.z));
+  const libresR=S.remitos.filter(r=>!prob(r)&&(!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c]))&&enDia(r.z));
   const porZona={};for(const g of grupos(libresR))(porZona[zk(g.z)]=porZona[zk(g.z)]||[]).push(g);
   const capOf=f=>f.cap||capG||Infinity;
   const fz=f=>zonaFlete(f);
@@ -535,7 +593,7 @@ function sugerir(nG,capG,nC,capC,modo){
 function sugHTML(){
   const porZ=necesidadDia(ui.capG);const zs=zonasDia(S.dia);
   // simulación: cuántos recorridos salen por zona con la capacidad grande
-  const delDiaR=S.remitos.filter(r=>enDia(r.z));const gz={};for(const g of grupos(delDiaR))(gz[zk(g.z)]=gz[zk(g.z)]||[]).push(g);
+  const delDiaR=S.remitos.filter(r=>enDia(r.z)&&!prob(r));const gz={};for(const g of grupos(delDiaR))(gz[zk(g.z)]=gz[zk(g.z)]||[]).push(g);
   let nec=0,livianos=0;const filas=zs.map(z=>{const d=porZ[z]||{kg:0};const rr=gz[z]?rutasZona(gz[z],ui.capG||Infinity):[];nec+=rr.length;livianos+=rr.filter(r=>r.kg<=ui.capC).length;return `<span class="tag">${esc(zTit(z))}: <b class="num">${fmtKg(d.kg)} kg</b>${rr.length?` · ${rr.length} flete${rr.length>1?"s":""}`:""}</span>`}).join(" ");
   const nCdef=ui.sugC??Math.min(1,livianos),nGdef=ui.sugG??Math.max(0,nec-nCdef);
   return `<div class="sugbox"><h2>Sugerir armado para el ${esc(DIAS[S.dia])}</h2>
@@ -570,7 +628,8 @@ function mapaHTML(gl){
   const libres=new Set(gl.map(g=>g.k));
   const ptsHTML=[];
   for(const g of near){const [x,y]=P(g.ll);const free=!g.rs.some(r=>S.asig[r.c]&&fIdx.has(S.asig[r.c]));void libres;
-    if(free&&!enDia(g.z))continue;const fid=free?null:S.asig[g.rs[0].c];const i=fIdx.get(fid);
+    if(free&&!enDia(g.z))continue;
+    if(g.rs.every(prob))continue;const fid=free?null:S.asig[g.rs[0].c];const i=fIdx.get(fid);
     const col=free?"var(--muted)":fleteColor(i??0),sel=ui.sel.has(g.k);const r=Math.min(9,4+Math.sqrt(g.kg)/4);
     const info=`${g.clientes.join(" / ")} · ${g.loc} · ${fmtKg(g.kg)} kg${free?"":" · "+(S.fletes[i]?.nombre||"")}`;
     ptsHTML.push(`<circle class="pt" data-act="pt" data-k="${esc(g.k)}" data-free="${free?1:0}" data-info="${esc(info)}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}" fill="${free?"var(--panel)":col}" stroke="${sel?"var(--fg)":col}" stroke-width="${sel?3:2}"><title>${esc(info)}</title></circle>`)}
@@ -596,10 +655,11 @@ function renderInner(){
       <label class="btn primary" for="fileIn">Elegir archivo</label></div>`;
     return;
   }
-  const libresTodos=R.filter(r=>!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c]));
+  const libresTodos=R.filter(r=>!prob(r)&&(!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c])));
+  const conProb=R.filter(prob);
   const libres=libresTodos.filter(r=>enDia(r.z)),otrosR=libresTodos.filter(r=>!enDia(r.z));
   const gl=grupos(libres);
-  const delDia=R.filter(r=>enDia(r.z)),diaKg=delDia.reduce((a,r)=>a+r.kg,0);
+  const delDia=R.filter(r=>enDia(r.z)&&!prob(r)),diaKg=delDia.reduce((a,r)=>a+r.kg,0);
   const zonas=[...new Set(R.filter(r=>enDia(r.z)).map(r=>r.z))].sort();
   const totKg=R.reduce((a,r)=>a+r.kg,0),libKg=libres.reduce((a,r)=>a+r.kg,0);
   const viejos=gl.filter(g=>g.maxDias>=3).length;void totKg;
@@ -608,19 +668,21 @@ function renderInner(){
     <div class="cell"><span class="k">Zonas del día</span><span style="font-size:13px;font-weight:600;max-width:34ch">${zonasDia(S.dia).map(zTit).join(", ")}</span></div>
     <div class="cell"><span class="k">Remitos del día</span><span class="v">${delDia.length} · ${fmtKg(diaKg)} kg</span></div>
     <div class="cell"><span class="k">Sin asignar del día</span><span class="v">${libres.length} rem · ${fmtKg(libKg)} kg</span></div>
+    ${conProb.length?`<div class="cell"><span class="k">Con problemas</span><span class="v" style="color:var(--bad)">${conProb.length} rem</span></div>`:""}
 
     ${viejos?`<div class="cell"><span class="k">Sin asignar con 3+ días hábiles</span><span class="v" style="color:var(--warn)">${viejos}</span></div>`:""}
   </div>${ui.mapa?mapaHTML(gl):""}<div class="board">`;
   // pool
   const vis=gl.filter(g=>(!ui.zona||g.z===ui.zona)&&(!ui.soloNuevos||g.nuevo)&&matchQ(g));
   const byZ={};for(const g of vis)(byZ[g.z]=byZ[g.z]||[]).push(g);
-  html+=`<section class="panel"><div class="panel-h"><h2>Sin asignar · ${esc(DIAS[S.dia])} <span class="num">${gl.length} paradas</span></h2>
-    <div class="filters"><input type="search" id="q" placeholder="Buscar cliente, calle, código…" value="${esc(ui.q)}">
+  html+=`<section class="panel"><div class="panel-h"><div class="tabs"><button class="tab ${ui.tab==="libres"?"on":""}" data-act="tab" data-t="libres">Sin asignar · ${esc(DIAS[S.dia])} <span class="num">${gl.length}</span></button><button class="tab ${ui.tab==="prob"?"on":""}" data-act="tab" data-t="prob">Con problemas <span class="num">${conProb.length}</span></button></div>
+    <div class="filters" ${ui.tab==="prob"?"hidden":""}><input type="search" id="q" placeholder="Buscar cliente, calle, código…" value="${esc(ui.q)}">
     <select id="zf"><option value="">Todas las zonas</option>${zonas.map(z=>`<option ${z===ui.zona?"selected":""}>${esc(z)}</option>`).join("")}</select>
     <select id="ordsel" aria-label="Ordenar"><option value="zona" ${ui.orden==="zona"?"selected":""}>Por zona</option><option value="km" ${ui.orden==="km"?"selected":""}>Por distancia a la base</option></select>
     <label class="chk"><input type="checkbox" id="sn" ${ui.soloNuevos?"checked":""}> Solo nuevos</label></div>
     ${ui.sel.size?`<div class="bulk"><b>${ui.sel.size}</b> seleccionadas <select id="bulkTo">${fleteOptions()}</select><button class="btn small" data-act="clearsel">Quitar selección</button></div>`:""}
     </div><div class="pool" data-drop="">`;
+  if(ui.tab==="prob"){html+=problemasHTML(conProb)}else{
   if(!vis.length)html+=`<div class="empty-drop">${gl.length?"Nada coincide con el filtro.":"Todo asignado. Arrastrá acá una parada para devolverla."}</div>`;
   if(ui.orden==="km"){html+=`<div class="zona">${vis.slice().sort((a,b)=>(a.km??1e9)-(b.km??1e9)).map(g=>paradaHTML(g,{showZ:true})).join("")}</div>`}
   else for(const z of Object.keys(byZ).sort()){
@@ -629,6 +691,7 @@ function renderInner(){
     html+=`<div class="zona"><div class="zona-h"><span class="zn">${esc(z)}</span><span class="num">${zr} rem · ${fmtKg(zk)} kg</span>
       ${S.fletes.length?`<select data-zonato="${esc(z)}" aria-label="Mandar toda la zona a un flete">${fleteOptions().replace("Mover a…","Toda la zona a…")}</select>`:""}</div>
       ${gs.map(g=>paradaHTML(g,{})).join("")}</div>`;
+  }
   }
   html+=`</div></section><section class="fletes">`;
   S.fletes.forEach((f,i)=>{
@@ -653,13 +716,20 @@ function renderInner(){
 
 // ---------- acciones ----------
 function assign(codes,fid){for(const c of codes){if(fid)S.asig[c]=fid;else delete S.asig[c]}markDirty();render()}
-function codesOfKeys(keys){const R=S.remitos.filter(r=>!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c]));return R.filter(r=>keys.has(paradaKey(r))).map(r=>r.c)}
+function codesOfKeys(keys){const R=S.remitos.filter(r=>!prob(r)&&(!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c])));return R.filter(r=>keys.has(paradaKey(r))).map(r=>r.c)}
 function addFlete(){const n=S.fletes.length+1;S.fletes.push({id:"f"+Date.now().toString(36),nombre:"Flete "+n,cap:1000});markDirty();render()}
-function toast(t){const el=$("#toast");el.textContent=t;el.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>el.hidden=true,4000)}
+function toast(t){if(EMB){try{if(window.parent.rowaPreplanToast){window.parent.rowaPreplanToast(t);return}}catch(e){}}const el=$("#toast");el.textContent=t;el.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>el.hidden=true,4000)}
 
 document.addEventListener("click",e=>{
   const b=e.target.closest("[data-act]");if(!b)return;const a=b.dataset.act;
   if(a==="pt"){const k=b.dataset.k;if(b.dataset.free==="1"){ui.sel.has(k)?ui.sel.delete(k):ui.sel.add(k);render()}else{toast(b.dataset.info)}return}
+  if(a==="tab"){ui.tab=b.dataset.t;render();return}
+  if(a==="probopen"){ui.probForm=ui.probForm&&ui.probForm.k===b.dataset.k?null:{k:b.dataset.k};render();return}
+  if(a==="probno"){ui.probForm=null;render();return}
+  if(a==="probok"){const box=b.closest(".probform");const codes=box.dataset.codes.split("|");const m=$("#probM").value,n=$("#probN").value.trim();
+    S.problemas=S.problemas||{};const f=new Date().toISOString();for(const c of codes){S.problemas[c]={m,n,f};delete S.asig[c]}
+    ui.probForm=null;toast(`${codes.length} remito${codes.length>1?"s":""} en “Con problemas”: no entran en las propuestas hasta que los marques como resueltos.`);markDirty();render();return}
+  if(a==="probquitar"){delete S.problemas[b.dataset.c];markDirty();render();return}
   if(a==="otras"){ui.verOtras=!ui.verOtras;render();return}
   if(a==="sugno"){ui.sug=false;render();return}
   if(a==="sugok"){try{
@@ -673,7 +743,7 @@ document.addEventListener("click",e=>{
     ui.undo=JSON.stringify({fletes:S.fletes,asig:S.asig});
     const r=sugerir(nG,capG,nC,capC,modo);ui.sug=false;
     ui.notice=`Propuesta para el ${DIAS[S.dia]}: ${r.nF} fletes, ${r.n} remitos repartidos, ≈${Math.round(r.km)} km en total.${r.sobran?` ${r.sobran} paradas no entraron en los fletes disponibles y quedaron sin asignar.`:""}`;
-    markDirty();render();window.scrollTo({top:0,behavior:"smooth"})}catch(err){console.error(err);toast("No se pudo armar la propuesta: "+(err&&err.message||err))}return}
+    markDirty();render();scrollArriba()}catch(err){console.error(err);toast("No se pudo armar la propuesta: "+(err&&err.message||err))}return}
   if(a==="undo"){if(ui.undo){const u=JSON.parse(ui.undo);S.fletes=u.fletes;S.asig=u.asig;ui.undo=null;ui.notice="Se deshizo la propuesta.";markDirty();render()}return}
   if(a==="toggle"){const k=b.dataset.k;ui.open.has(k)?ui.open.delete(k):ui.open.add(k);render()}
   else if(a==="unassign")assign(b.dataset.codes.split("|"),null);
@@ -685,14 +755,14 @@ document.addEventListener("click",e=>{
   else if(a==="delok"){const id=b.dataset.f;S.fletes=S.fletes.filter(f=>f.id!==id);for(const c in S.asig)if(S.asig[c]===id)delete S.asig[c];ui.confirmDel=null;markDirty();render()}
   else if(a==="reset"){ui.confirmReset=true;render()}
   else if(a==="resetno"){ui.confirmReset=false;render()}
-  else if(a==="resetok"){S={remitos:[],cargado:null,fletes:[],asig:{},nuevos:{},base:S.base||BASE0,clientesInfo:S.clientesInfo,dia:proxHabil()};ui.confirmReset=false;ui.sel.clear();ui.undo=null;saveRemitos();markDirty();render()}
+  else if(a==="resetok"){S={remitos:[],cargado:null,fletes:[],asig:{},nuevos:{},base:S.base||BASE0,clientesInfo:S.clientesInfo,dia:proxHabil(),problemas:{}};ui.confirmReset=false;ui.sel.clear();ui.undo=null;saveRemitos();markDirty();render()}
   else if(a==="closenotice"){ui.notice=null;ui.undo=null;render()}
 });
 document.addEventListener("change",e=>{
   const t=e.target;
   if(t.dataset.sel!==undefined){t.checked?ui.sel.add(t.dataset.sel):ui.sel.delete(t.dataset.sel);render()}
   else if(t.id==="bulkTo"&&t.value){const codes=codesOfKeys(ui.sel);ui.sel.clear();assign(codes,t.value)}
-  else if(t.dataset.zonato&&t.value){const z=t.dataset.zonato;const codes=S.remitos.filter(r=>r.z===z&&(!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c]))).map(r=>r.c);assign(codes,t.value)}
+  else if(t.dataset.zonato&&t.value){const z=t.dataset.zonato;const codes=S.remitos.filter(r=>r.z===z&&!prob(r)&&(!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c]))).map(r=>r.c);assign(codes,t.value)}
   else if(t.id==="zf"){ui.zona=t.value;render()}
   else if(t.id==="sn"){ui.soloNuevos=t.checked;render()}
   else if(t.id==="ordsel"){ui.orden=t.value;render()}
@@ -704,7 +774,7 @@ document.addEventListener("change",e=>{
 });
 document.addEventListener("input",e=>{if(e.target.id==="q"){ui.q=e.target.value;clearTimeout(render.qt);render.qt=setTimeout(()=>{render();const q=$("#q");if(q){q.focus();q.setSelectionRange(q.value.length,q.value.length)}},200)}});
 $("#addFlete").onclick=addFlete;
-$("#sugBtn").onclick=()=>{ui.sug=!ui.sug;if(!S.remitos.length){toast("Primero cargá los remitos.");ui.sug=false}render();if(ui.sug){window.scrollTo({top:0,behavior:"smooth"});$("#sugN")?.focus({preventScroll:true})}};
+$("#sugBtn").onclick=()=>{ui.sug=!ui.sug;if(!S.remitos.length){toast("Primero cargá los remitos.");ui.sug=false}render();if(ui.sug){scrollArriba();$("#sugN")?.focus({preventScroll:true})}};
 $("#mapBtn").onclick=()=>{ui.mapa=!ui.mapa;render()};
 // drag & drop de paradas y de archivos
 let dragCodes=null;
@@ -733,11 +803,12 @@ async function exportar(){
   for(const f of S.fletes){const rs=S.remitos.filter(r=>S.asig[r.c]===f.id);
     resumen.push([f.nombre,grupos(rs).length,rs.length,Math.round(rs.reduce((a,r)=>a+r.kg,0)*10)/10,Math.round(ruta(grupos(rs)).km)||"",f.cap||"",[...new Set(rs.map(r=>r.z))].join(", ")]);
     const ws=XLSX.utils.aoa_to_sheet(filas(rs,true));ws["!cols"]=[{wch:6},{wch:30},{wch:45},{wch:16},{wch:16},{wch:8},{wch:22},{wch:11},{wch:8},{wch:40},{wch:6}];XLSX.utils.book_append_sheet(wb,ws,sheetName(f.nombre,used))}
-  const lib=S.remitos.filter(r=>!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c]));
+  const lib=S.remitos.filter(r=>!prob(r)&&(!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c])));
   resumen.push(["Sin asignar",grupos(lib).length,lib.length,Math.round(lib.reduce((a,r)=>a+r.kg,0)*10)/10,"","",""]);
   const wr=XLSX.utils.aoa_to_sheet(resumen);wr["!cols"]=[{wch:22},{wch:8},{wch:8},{wch:10},{wch:12},{wch:14},{wch:60}];
   XLSX.utils.book_append_sheet(wb,wr,sheetName("Resumen",used));wb.SheetNames.unshift(wb.SheetNames.pop());
   const ws=XLSX.utils.aoa_to_sheet(filas(lib));XLSX.utils.book_append_sheet(wb,ws,sheetName("Sin asignar",used));
+  const pr=S.remitos.filter(prob);if(pr.length){const wp=XLSX.utils.aoa_to_sheet([["Cliente","Domicilio","Zona","Código de pedido","Kg","Motivo","Detalle","Desde"],...pr.map(r=>{const p=S.problemas[r.c];return [r.cl,r.d,r.z,r.c,Math.round(r.kg*100)/100,p.m,p.n||"",new Date(p.f).toLocaleDateString("es-AR")]})]);wp["!cols"]=[{wch:30},{wch:45},{wch:16},{wch:22},{wch:8},{wch:28},{wch:30},{wch:10}];XLSX.utils.book_append_sheet(wb,wp,sheetName("Con problemas",used))}
   const data=XLSX.write(wb,{bookType:"xlsx",type:"array"});
   const d=new Date(),fn=`preplanificacion_${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}.xlsx`;
   const blob=new Blob([data],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
@@ -761,7 +832,7 @@ render();setSaved("");
   if(!db&&!window.claude){try{db=(window.parent!==window&&window.parent.rowaPreplanStore)||null}catch(e){db=null}}
   if(!db){setSaved("Guardado en este navegador");return}
   db.doc("pre/remitos").onSnapshot(s=>{if(s.exists){const d=cp(s.data());S.remitos=d.lista||[];S.cargado=d.cargado||null;lsSave();render()}},e=>{console.error(e);setSaved("Sin conexión con la nube: se guarda en este navegador")});
-  db.doc("pre/plan").onSnapshot(s=>{if(dirtyPlan||saving)return;if(s.exists){const d=cp(s.data());if(ultimoLocal&&(!d.actualizado||d.actualizado<ultimoLocal))return;S.fletes=d.fletes||[];S.asig=d.asig||{};S.nuevos=d.nuevos||{};S.base=d.base||BASE0;S.dia=proxHabil();S.clientesInfo=d.clientesInfo||null;lsSave();render();setSaved("Guardado")}},()=>{});
+  db.doc("pre/plan").onSnapshot(s=>{if(dirtyPlan||saving)return;if(s.exists){const d=cp(s.data());if(ultimoLocal&&(!d.actualizado||d.actualizado<ultimoLocal))return;S.fletes=d.fletes||[];S.asig=d.asig||{};S.nuevos=d.nuevos||{};S.base=d.base||BASE0;S.problemas=d.problemas||{};S.dia=proxHabil();S.clientesInfo=d.clientesInfo||null;lsSave();render();setSaved("Guardado")}},()=>{});
 })();
 })();
 </script>

@@ -2,6 +2,7 @@
 // La herramienta vive en public/preplanificacion.html (la misma página que se usa en Claude).
 // Acá la mostramos dentro del sitio y le damos un guardado en Firebase con la misma forma
 // que espera la página: db.doc("pre/plan"), db.doc("geo/c0"), db.collection("geo").get().
+import { useState, useEffect, useRef } from 'react';
 import { getApp } from 'firebase/app';
 import { getFirestore, doc, collection, getDoc, getDocs, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 
@@ -33,19 +34,49 @@ const rowaPreplanStore = {
 if (typeof window !== 'undefined') window.rowaPreplanStore = rowaPreplanStore;
 
 export default function PreplanificacionApp({ onNavigate }) {
+    const [height, setHeight] = useState(900);
+    const [aviso, setAviso] = useState(null);
+    const frameRef = useRef(null);
+
+    useEffect(() => {
+        let t;
+        window.rowaPreplanResize = (h) => setHeight(Math.max(400, h));
+        window.rowaPreplanToast = (msg) => { setAviso(msg); clearTimeout(t); t = setTimeout(() => setAviso(null), 4500); };
+        window.rowaPreplanScrollTop = () => frameRef.current && window.scrollTo({ top: frameRef.current.getBoundingClientRect().top + window.scrollY - 16, behavior: 'smooth' });
+        return () => { clearTimeout(t); delete window.rowaPreplanResize; delete window.rowaPreplanToast; delete window.rowaPreplanScrollTop; };
+    }, []);
+
     return (
-        <div className="flex flex-col h-screen">
-            <div className="flex items-center gap-4 px-4 py-2 bg-white shadow-sm">
-                <button onClick={() => onNavigate('hub')} className="bg-white px-4 py-2 rounded-lg shadow hover:bg-gray-200 transition-colors">
-                    &larr; Volver al Menú
-                </button>
-                <span className="text-gray-600 text-sm">Preplanificación de fletes</span>
-            </div>
+        <AppContainerPreplan onNavigate={onNavigate}>
             <iframe
+                ref={frameRef}
                 src="/preplanificacion.html"
                 title="Preplanificación de fletes"
-                className="flex-1 w-full border-0"
+                scrolling="no"
+                style={{ height: height + 'px' }}
+                className="w-full border-0 block bg-transparent"
             />
+            {aviso && (
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-5 py-3 rounded-xl shadow-lg text-sm max-w-xl z-50">
+                    {aviso}
+                </div>
+            )}
+        </AppContainerPreplan>
+    );
+}
+
+// Mismo armado que AppContainer en App.jsx (botón de volver + título centrado)
+function AppContainerPreplan({ onNavigate, children }) {
+    return (
+        <div className="container mx-auto p-4 md:p-8 max-w-7xl">
+            <button onClick={() => onNavigate('hub')} className="mb-8 bg-white px-4 py-2 rounded-lg shadow hover:bg-gray-200 transition-colors">
+                &larr; Volver al Menú
+            </button>
+            <header className="text-center mb-8">
+                <h1 className="text-4xl font-bold text-gray-900">Preplanificación de Fletes</h1>
+                <p className="text-gray-600 mt-2">Armado del reparto del día siguiente por zona, con mapa y recorrido desde Rowa Escobar.</p>
+            </header>
+            {children}
         </div>
     );
 }
