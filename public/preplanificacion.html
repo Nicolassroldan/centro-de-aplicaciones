@@ -709,7 +709,7 @@ function renderInner(){
   });
   html+=`<button class="empty-drop btn" data-act="addflete" style="min-height:120px;align-self:start">+ Agregar flete</button>`;
   html+=`</section></div>
-    <div style="display:flex;justify-content:flex-end">${ui.confirmReset?`<span class="confirm">Esto borra los remitos cargados y los fletes. <button class="btn small danger" data-act="resetok">Borrar todo</button><button class="btn small" data-act="resetno">Cancelar</button></span>`:`<button class="btn small ghost" data-act="reset">Empezar de cero</button>`}</div>`;
+    <div style="display:flex;justify-content:flex-end">${ui.confirmReset?`<span class="confirm">Esto borra los remitos cargados y los fletes (los remitos con problemas siguen marcados). <button class="btn small danger" data-act="resetok">Borrar todo</button><button class="btn small" data-act="resetno">Cancelar</button></span>`:`<button class="btn small ghost" data-act="reset">Empezar de cero</button>`}</div>`;
   main.innerHTML=html;
   const p=$(".pool");if(p)p.scrollTop=scrollPool;
 }
@@ -755,7 +755,7 @@ document.addEventListener("click",e=>{
   else if(a==="delok"){const id=b.dataset.f;S.fletes=S.fletes.filter(f=>f.id!==id);for(const c in S.asig)if(S.asig[c]===id)delete S.asig[c];ui.confirmDel=null;markDirty();render()}
   else if(a==="reset"){ui.confirmReset=true;render()}
   else if(a==="resetno"){ui.confirmReset=false;render()}
-  else if(a==="resetok"){S={remitos:[],cargado:null,fletes:[],asig:{},nuevos:{},base:S.base||BASE0,clientesInfo:S.clientesInfo,dia:proxHabil(),problemas:{}};ui.confirmReset=false;ui.sel.clear();ui.undo=null;saveRemitos();markDirty();render()}
+  else if(a==="resetok"){S={remitos:[],cargado:null,fletes:[],asig:{},nuevos:{},base:S.base||BASE0,clientesInfo:S.clientesInfo,dia:proxHabil(),problemas:S.problemas||{}};ui.confirmReset=false;ui.sel.clear();ui.undo=null;saveRemitos();markDirty();render()}
   else if(a==="closenotice"){ui.notice=null;ui.undo=null;render()}
 });
 document.addEventListener("change",e=>{
