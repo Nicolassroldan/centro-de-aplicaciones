@@ -1,0 +1,769 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>:root{color-scheme:light}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<!-- Preplanificación de fletes. Misma página que el artifact de Claude; dentro del sitio guarda en Firebase vía window.parent.rowaPreplanStore -->
+<title>Preplanificación de fletes</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+/* Layout: mesa de despacho — a la izquierda la "bandeja" de remitos sin asignar por zona, a la derecha los fletes tentativos como bandejas */
+:root{
+  --bg:#eef1f3; --panel:#ffffff; --sunk:#e3e8ec; --line:#cdd5dc; --fg:#1a2530; --muted:#5d6b78;
+  --accent:#0f5f8c; --accent-soft:#d9e9f3; --warn:#b4560b; --warn-soft:#fbe9d6; --bad:#b3261e; --bad-soft:#f8dedc; --ok:#2c7a4b;
+  --paper:#fffdf6;
+  --f1:#0f5f8c; --f2:#8a4fbf; --f3:#2c7a4b; --f4:#c0631b; --f5:#b8336a; --f6:#3b6e7a; --f7:#7a6a1f; --f8:#4a5bd1;
+  --font-ui:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-num:"IBM Plex Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;
+  --r:6px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#12181e; --panel:#1a232b; --sunk:#141c22; --line:#2c3943; --fg:#e4eaef; --muted:#93a2ae;
+  --accent:#5fb0e0; --accent-soft:#16344a; --warn:#f0a35e; --warn-soft:#3e2a16; --bad:#f08a80; --bad-soft:#40201e; --ok:#6cc792;
+  --paper:#1e2830;
+  --f1:#5fb0e0; --f2:#b98ae6; --f3:#6cc792; --f4:#f0a35e; --f5:#ec7fa9; --f6:#79b8c6; --f7:#d3c06a; --f8:#93a2ff;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12181e; --panel:#1a232b; --sunk:#141c22; --line:#2c3943; --fg:#e4eaef; --muted:#93a2ae;
+  --accent:#5fb0e0; --accent-soft:#16344a; --warn:#f0a35e; --warn-soft:#3e2a16; --bad:#f08a80; --bad-soft:#40201e; --ok:#6cc792;
+  --paper:#1e2830;
+  --f1:#5fb0e0; --f2:#b98ae6; --f3:#6cc792; --f4:#f0a35e; --f5:#ec7fa9; --f6:#79b8c6; --f7:#d3c06a; --f8:#93a2ff;
+  color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-ui);font-size:14px;line-height:1.4}
+.wrap{padding-block:16px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));max-width:1600px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.num{font-family:var(--font-num);font-variant-numeric:tabular-nums}
+
+header.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+h1{margin:0;font-size:24px;font-weight:800;letter-spacing:-.01em;text-wrap:balance}
+.sub{color:var(--muted);font-size:13px;margin-top:2px}
+.actions{display:flex;flex-wrap:wrap;gap:8px}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:var(--r);padding:7px 12px;font-weight:600;display:inline-flex;gap:6px;align-items:center}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--panel)}
+.btn.small{padding:3px 8px;font-size:12px}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--muted)}
+.btn.ghost:hover{color:var(--fg);border-color:var(--line)}
+.btn.danger{color:var(--bad)}
+.btn[disabled]{opacity:.5;cursor:default}
+
+.strip{display:flex;flex-wrap:wrap;gap:6px 22px;align-items:baseline;padding:10px 14px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r)}
+.strip .k{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.strip .v{font-family:var(--font-num);font-size:18px;font-weight:600}
+.strip .cell{display:flex;flex-direction:column}
+.notice{padding:9px 14px;border-radius:var(--r);background:var(--accent-soft);font-size:13px;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.notice.warn{background:var(--warn-soft)}
+
+.board{display:grid;grid-template-columns:minmax(320px,420px) 1fr;gap:14px;align-items:start}
+@media (max-width:860px){.board{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);min-width:0}
+.panel-h{padding:10px 12px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
+.panel-h h2{margin:0;font-size:15px;font-weight:700;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.panel-h h2 .num{font-size:12px;color:var(--muted);font-weight:500}
+.filters{display:flex;gap:6px;flex-wrap:wrap}
+.filters input[type=search]{flex:1 1 140px;min-width:0;border:1px solid var(--line);border-radius:var(--r);padding:6px 9px;background:var(--sunk)}
+.filters select{border:1px solid var(--line);border-radius:var(--r);padding:6px;background:var(--sunk);max-width:100%}
+.chk{display:inline-flex;gap:5px;align-items:center;font-size:12px;color:var(--muted)}
+.bulk{display:flex;gap:6px;align-items:center;flex-wrap:wrap;background:var(--accent-soft);padding:6px 8px;border-radius:var(--r);font-size:13px}
+.bulk select{border:1px solid var(--line);border-radius:var(--r);padding:4px;background:var(--panel)}
+
+.pool{max-height:calc(100vh - 230px);overflow:auto;padding:6px 8px 10px}
+@media (max-width:860px){.pool{max-height:none}}
+.pool.drop-hot,.flete.drop-hot{outline:2px dashed var(--accent);outline-offset:-4px}
+.zona{margin-top:8px}
+.zona-h{display:flex;align-items:center;gap:8px;padding:6px 4px;position:sticky;top:-6px;background:var(--panel);z-index:1;border-bottom:1px solid var(--line)}
+.zona-h .zn{font-weight:700;font-size:12px;letter-spacing:.06em;text-transform:uppercase;flex:1;min-width:0}
+.zona-h .num{font-size:12px;color:var(--muted)}
+.zona-h select{font-size:12px;border:1px solid var(--line);border-radius:var(--r);padding:2px 4px;background:var(--sunk);max-width:120px}
+
+.parada{display:grid;grid-template-columns:auto 1fr auto;gap:2px 8px;align-items:start;padding:7px 6px;border-bottom:1px dashed var(--line);background:var(--paper);cursor:grab}
+.parada:hover{background:var(--sunk)}
+.parada.dragging{opacity:.4}
+.parada input[type=checkbox]{margin-top:3px}
+.parada .who{font-weight:600;min-width:0;overflow-wrap:anywhere}
+.parada .where{grid-column:2;color:var(--muted);font-size:12px;min-width:0;overflow-wrap:anywhere}
+.parada .kg{font-family:var(--font-num);font-size:12px;text-align:right;white-space:nowrap}
+.parada .tags{grid-column:2 / 4;display:flex;gap:4px;flex-wrap:wrap}
+.tag{font-size:11px;padding:1px 6px;border-radius:99px;background:var(--sunk);color:var(--muted);white-space:nowrap}
+.tag.old{background:var(--warn-soft);color:var(--warn);font-weight:600}
+.tag.veryold{background:var(--bad-soft);color:var(--bad);font-weight:600}
+.tag.new{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.tag.multi{background:var(--fg);color:var(--panel)}
+.expand{grid-column:1 / 4;margin:4px 0 2px 22px;border-left:2px solid var(--line);padding-left:8px;display:flex;flex-direction:column;gap:6px;cursor:auto}
+.rem{font-size:12px}
+.rem .code{font-family:var(--font-num);font-weight:600}
+.rem .code small{color:var(--muted);font-weight:400}
+.rem ul{margin:2px 0 0;padding-left:16px;color:var(--muted)}
+.rem .rowx{display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap}
+.link{background:none;border:none;color:var(--accent);padding:0;font-size:12px;text-decoration:underline}
+
+.fletes{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;min-width:0}
+.flete{background:var(--panel);border:1px solid var(--line);border-top:4px solid var(--fc);border-radius:var(--r);display:flex;flex-direction:column;min-width:0}
+.flete-h{padding:8px 10px;display:flex;flex-direction:column;gap:6px;border-bottom:1px solid var(--line)}
+.flete-h .row1{display:flex;gap:6px;align-items:center}
+.flete-h input.name{flex:1;min-width:0;font-weight:700;font-size:15px;border:1px solid transparent;background:transparent;border-radius:4px;padding:2px 4px}
+.flete-h input.name:hover,.flete-h input.name:focus{border-color:var(--line);background:var(--sunk)}
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.metrics div{display:flex;flex-direction:column}
+.metrics .k{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.metrics .v{font-family:var(--font-num);font-weight:600;font-size:15px}
+.cap{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.cap input{width:72px;border:1px solid var(--line);border-radius:4px;padding:2px 4px;background:var(--sunk);font-family:var(--font-num)}
+.bar{height:6px;background:var(--sunk);border-radius:3px;overflow:hidden;flex:1}
+.bar i{display:block;height:100%;background:var(--fc)}
+.bar.over i{background:var(--bad)}
+.zchips{display:flex;gap:4px;flex-wrap:wrap}
+.flete-list{padding:4px 6px 8px;min-height:70px;max-height:520px;overflow:auto}
+.flete-list .parada{grid-template-columns:auto 1fr auto}
+.ord{font-family:var(--font-num);font-size:11px;color:var(--muted);margin-top:2px;min-width:16px}
+.empty-drop{color:var(--muted);font-size:12px;text-align:center;padding:18px 8px;border:1px dashed var(--line);border-radius:var(--r);margin:6px}
+.x{border:none;background:none;color:var(--muted);font-size:16px;line-height:1;padding:0 2px}
+.x:hover{color:var(--bad)}
+
+.empty{background:var(--panel);border:2px dashed var(--line);border-radius:var(--r);padding:28px 20px;display:flex;flex-direction:column;gap:10px;align-items:flex-start}
+.empty h2{margin:0;font-size:18px}
+.empty ol{margin:0;padding-left:20px;color:var(--muted);max-width:65ch}
+.dropzone-hot{border-color:var(--accent);background:var(--accent-soft)}
+.mapwrap{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.map-h{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--line)}
+.map-h h2{margin:0;font-size:15px}
+.map-h .legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;color:var(--muted)}
+.map-h .legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px}
+.basebox{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.basebox input{width:170px;border:1px solid var(--line);border-radius:4px;padding:3px 6px;background:var(--sunk);font-family:var(--font-num);font-size:12px}
+.mapsvg{display:block;width:100%;height:auto;max-height:min(560px,70vh);background:var(--sunk);touch-action:manipulation}
+.mapsvg .ref{fill:var(--muted);font-size:11px;font-family:var(--font-ui);opacity:.75}
+.mapsvg .refdot{fill:var(--muted);opacity:.5}
+.mapsvg .pt{cursor:pointer}
+.mapsvg .route{fill:none;stroke-width:2;stroke-linejoin:round;opacity:.75}
+.mapsvg .base{fill:var(--fg)}
+.mapsvg .baselbl{fill:var(--fg);font-size:12px;font-weight:700;font-family:var(--font-ui)}
+.mapnote{font-size:12px;color:var(--muted);padding:6px 12px}
+.km{font-family:var(--font-num);font-size:11px;color:var(--muted)}
+.tag.nogeo{background:var(--bad-soft);color:var(--bad)}
+.sugbox{background:var(--panel);border:1px solid var(--accent);border-radius:var(--r);padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+.sugbox h2{margin:0;font-size:15px}
+.sugbox .row{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center}
+.sugbox label{font-size:13px;display:inline-flex;gap:6px;align-items:center}
+.sugbox input[type=number]{width:90px;border:1px solid var(--line);border-radius:4px;padding:4px 6px;background:var(--sunk);font-family:var(--font-num)}
+.sugbox p{margin:0;font-size:12px;color:var(--muted);max-width:75ch}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--panel);padding:9px 14px;border-radius:var(--r);font-size:13px;z-index:20;max-width:calc(100% - 32px)}
+.saved{font-size:12px;color:var(--muted)}
+.confirm{display:flex;gap:6px;align-items:center;font-size:12px;flex-wrap:wrap}
+@media (prefers-reduced-motion:no-preference){.parada,.btn{transition:background .12s,border-color .12s}}
+</style>
+
+<div class="wrap" id="app">
+  <header class="top">
+    <div>
+      <h1>Preplanificación de fletes</h1>
+      <div class="sub" id="sub">Remitos no planificados, ordenados por flete antes de pasar a QuadMinds</div>
+    </div>
+    <div class="actions">
+      <label class="btn primary" for="fileIn">Cargar archivos</label>
+      <input type="file" id="fileIn" accept=".xls,.xlsx,.csv" multiple hidden>
+      <button class="btn" id="sugBtn">Sugerir armado</button>
+      <button class="btn" id="mapBtn">Mapa</button>
+      <button class="btn" id="addFlete">+ Flete</button>
+      <button class="btn" id="exportBtn">Exportar Excel</button>
+      <span class="saved" id="saved"></span>
+    </div>
+  </header>
+  <div id="notices"></div>
+  <div id="main"></div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(function(){
+"use strict";
+// ---------- estado ----------
+const BASE0={nombre:"Rowa Escobar",lat:-34.3555,lng:-58.7650};
+let S={remitos:[],cargado:null,fletes:[],asig:{},nuevos:{},base:BASE0,clientesInfo:null,dia:null};
+let CLI=null; // maestro de clientes: [[domNorm,nombreNorm,numero,lat,lng]]
+let ui={verOtras:false,sug:false,sugG:null,sugC:null,capG:1000,capC:500,sugModo:"libres",undo:null,q:"",zona:"",orden:"zona",mapa:true,soloNuevos:false,sel:new Set(),open:new Set(),confirmDel:null,confirmReset:false,notice:null};
+let db=null, downloads=null, dirtyPlan=false, saving=false, pendingSave=false;
+const LS="preplan-fletes-v1";
+const FC=["--f1","--f2","--f3","--f4","--f5","--f6","--f7","--f8"];
+const $=s=>document.querySelector(s);
+const cp=o=>JSON.parse(JSON.stringify(o)); // los datos de la nube llegan congelados: trabajar sobre una copia
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtKg=n=>n>0&&n<0.1?"<0,1":(Math.round(n*10)/10).toLocaleString("es-AR",{maximumFractionDigits:1});
+
+// ---------- helpers de domicilio ----------
+const CP={"€":128,"‚":130,"ƒ":131,"„":132,"…":133,"†":134,"‡":135,"ˆ":136,"‰":137,"Š":138,"‹":139,"Œ":140,"Ž":142,"‘":145,"’":146,"“":147,"”":148,"•":149,"–":150,"—":151,"˜":152,"™":153,"š":154,"›":155,"œ":156,"ž":158,"Ÿ":159};
+function fixEnc(s){s=String(s??"").trim();if(!/[ÃÂ]/.test(s))return s;
+  const b=[];for(const ch of s){const c=ch.charCodeAt(0);if(c<256)b.push(c);else if(CP[ch]!==undefined)b.push(CP[ch]);else return s}
+  try{return new TextDecoder("utf-8",{fatal:true}).decode(new Uint8Array(b))}catch(e){return s}}
+const norm=s=>fixEnc(s).normalize("NFKD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/[^a-z0-9]/g,"");
+const CABA=/aut[oó]noma|capital federal|caba|c\.a\.b\.a/i;
+function localidad(dom){
+  const parts=dom.split(",").map(p=>p.trim()).filter(Boolean);
+  if(parts.some(p=>CABA.test(p)))return "CABA";
+  const rest=parts.slice(1).filter(p=>!/^argentina$/i.test(p)&&!/^(provincia de )?buenos aires$/i.test(p));
+  let l=rest.length?rest[rest.length-1]:(parts[0]||"");
+  l=l.replace(/^[A-Z]\d{4}[A-Z]{0,3}\s+/,"");
+  return l.toLowerCase().replace(/(^|\s)\S/g,c=>c.toUpperCase());
+}
+const paradaKey=r=>r.d.toLowerCase().replace(/\s+/g," ").trim();
+function dias(f){if(!f)return 0;const d=new Date(f+"T00:00:00"),t=new Date();t.setHours(0,0,0,0);let n=0;d.setDate(d.getDate()+1);while(d<=t){const w=d.getDay();if(w&&w<6)n++;d.setDate(d.getDate()+1)}return n}
+function codeParts(c){const i=c.lastIndexOf("_");return i>0?[c.slice(0,i),c.slice(i+1)]:[c,""]}
+// ---------- agenda de zonas ----------
+const DIAS=["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"];
+const AGENDA={1:["OESTE 1","OESTE 2","OESTE 3"],2:["SUR","SUR-OESTE","CAPITAL 3"],3:["NORTE 1","NORTE 2","CAPITAL 1","CAPITAL 2"],4:["OESTE 1","OESTE 2","SUR-OESTE"],5:["NORTE 1","NORTE 2","CAPITAL 1","CAPITAL 2","CAPITAL 3"]};
+const SIEMPRE=["TRANSPORTE 1","TRANSPORTE 2"];
+const zk=z=>String(z||"").toUpperCase().replace(/^ZONA\s+/,"").replace(/\s+/g," ").replace(/SUR\s*-?\s*OESTE/,"SUR-OESTE").trim();
+const zTit=z=>{const k=zk(z);return k.charAt(0)+k.slice(1).toLowerCase()};
+function proxHabilFecha(){const d=new Date();do{d.setDate(d.getDate()+1)}while(d.getDay()===0||d.getDay()===6);return d}
+function proxHabil(){return proxHabilFecha().getDay()}
+const zonasDia=d=>(AGENDA[d]||[]).concat(SIEMPRE);
+const enDia=(z,d=S.dia)=>zonasDia(d).includes(zk(z));
+function proximaSalida(z){const k=zk(z);for(let i=1;i<=5;i++){const d=((S.dia-1+i)%5)+1;if(zonasDia(d).includes(k))return DIAS[d]}return "sin día asignado"}
+function zonaFlete(f){if(f.zona)return f.zona;const rs=S.remitos.filter(r=>S.asig[r.c]===f.id);const c={};rs.forEach(r=>c[zk(r.z)]=(c[zk(r.z)]||0)+r.kg);const k=Object.keys(c).sort((a,b)=>c[b]-c[a])[0];return k||""}
+// ---------- geografía ----------
+const VIAL=1.35; // factor calle vs. línea recta
+function hav(a,b){const R=6371,t=Math.PI/180,dl=(b[0]-a[0])*t,dg=(b[1]-a[1])*t;const x=Math.sin(dl/2)**2+Math.cos(a[0]*t)*Math.cos(b[0]*t)*Math.sin(dg/2)**2;return 2*R*Math.asin(Math.sqrt(x))}
+const kmV=(a,b)=>hav(a,b)*VIAL;
+const baseLL=()=>[S.base.lat,S.base.lng];
+// orden de recorrido: vecino más cercano desde la base + mejora 2-opt (ida y vuelta a la base)
+function ruta(gs){
+  const con=gs.filter(g=>g.ll),sin=gs.filter(g=>!g.ll);if(!con.length)return {orden:sin,km:0};
+  const B=baseLL(),left=con.slice(),ord=[];let cur=B;
+  while(left.length){let bi=0,bd=1e9;left.forEach((g,i)=>{const d=hav(cur,g.ll);if(d<bd){bd=d;bi=i}});cur=left[bi].ll;ord.push(left.splice(bi,1)[0])}
+  const pts=[B,...ord.map(g=>g.ll),B];
+  let mejoro=true,it=0;
+  while(mejoro&&it++<60){mejoro=false;
+    for(let i=1;i<pts.length-2;i++)for(let k=i+1;k<pts.length-1;k++){
+      const d=hav(pts[i-1],pts[i])+hav(pts[k],pts[k+1])-hav(pts[i-1],pts[k])-hav(pts[i],pts[k+1]);
+      if(d>1e-6){pts.splice(i,k-i+1,...pts.slice(i,k+1).reverse());ord.splice(i-1,k-i+1,...ord.slice(i-1,k).reverse());mejoro=true}}}
+  let km=0;for(let i=1;i<pts.length;i++)km+=kmV(pts[i-1],pts[i]);
+  return {orden:[...ord,...sin],km};
+}
+// ---------- maestro de clientes (CSV de QuadMinds) ----------
+function parseCSV(text){
+  const rows=[];let row=[],f="",q=false;
+  for(let i=0;i<text.length;i++){const c=text[i];
+    if(q){if(c==='"'){if(text[i+1]==='"'){f+='"';i++}else q=false}else f+=c}
+    else if(c==='"')q=true;else if(c===";"){row.push(f);f=""}else if(c==="\n"||c==="\r"){if(c==="\r"&&text[i+1]==="\n")i++;row.push(f);rows.push(row);row=[];f=""}else f+=c}
+  if(f||row.length){row.push(f);rows.push(row)}
+  return rows;
+}
+function parseClientes(buf){
+  const text=new TextDecoder("windows-1252").decode(buf);const rows=parseCSV(text);
+  const h=rows[0]||[];const ix=n=>h.findIndex(x=>norm(x)===n);
+  const ic=ix("codigo"),ir=ix("razonsocial"),id=ix("domicilio"),ila=ix("latitud"),ilo=ix("longitud");
+  if(ic<0||id<0||ila<0||ilo<0)return null;
+  const out=[];let sin=0;
+  for(const r of rows.slice(1)){if(!r[ic])continue;
+    const la=parseFloat(String(r[ila]).replace(",",".")),lo=parseFloat(String(r[ilo]).replace(",","."));
+    if(!la||!lo||Math.abs(la)>60||Math.abs(lo)>80){sin++;continue}
+    out.push([norm(r[id]),norm(r[ir]),String(r[ic]).split("/")[0].trim(),Math.round(la*1e5)/1e5,Math.round(lo*1e5)/1e5])}
+  return {lista:out,sin};
+}
+function geoRemitos(list){
+  if(!CLI)return 0;
+  const byD=new Map(),byN=new Map(),byNum=new Map();
+  for(const c of CLI){(byD.get(c[0])||byD.set(c[0],[]).get(c[0])).push(c);(byN.get(c[1])||byN.set(c[1],[]).get(c[1])).push(c);(byNum.get(c[2])||byNum.set(c[2],[]).get(c[2])).push(c)}
+  let n=0;
+  for(const r of list){
+    const nd=norm(r.d),nr=norm(r.cl);let m=byD.get(nd),hit=null;
+    if(m)hit=m.find(c=>c[1]===nr)||m[0];
+    if(!hit){m=byN.get(nr);if(m&&m.length===1)hit=m[0];else if(m){hit=m.find(c=>nd.startsWith(c[0].slice(0,12)))||null}}
+    if(!hit&&r.t==="Cliente"){m=byNum.get(codeParts(r.c)[1]);if(m&&m.length===1)hit=m[0]}
+    if(hit){r.ll=[hit[3],hit[4]];n++}else delete r.ll;
+  }
+  return n;
+}
+async function cargarCLIdb(){
+  if(CLI||!db)return;
+  try{const snap=await db.collection("geo").get();const parts=snap.docs.map(d=>cp(d.data())).sort((a,b)=>a.i-b.i);if(parts.length)CLI=parts.flatMap(p=>p.rows)}catch(e){}
+}
+async function guardarCLI(){
+  try{localStorage.setItem(LS+"-cli",JSON.stringify(CLI))}catch(e){}
+  if(!db)return;
+  const N=700;const n=Math.ceil(CLI.length/N);
+  try{for(let i=0;i<n;i++)await db.doc("geo/c"+i).set({i,rows:CLI.slice(i*N,(i+1)*N)});
+    for(let i=n;i<n+6;i++){const d=await db.doc("geo/c"+i).get();if(d.exists)await db.doc("geo/c"+i).delete();else break}}
+  catch(e){toast("No se pudo guardar el listado de clientes en la nube; quedó en este navegador.")}
+}
+
+// ---------- parseo de Excel ----------
+function toISO(v){
+  if(v instanceof Date){return v.getFullYear()+"-"+String(v.getMonth()+1).padStart(2,"0")+"-"+String(v.getDate()).padStart(2,"0")}
+  const s=String(v??"").trim();let m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if(m)return m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0");
+  m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);return m?m[0]:s;
+}
+function rowsOf(buf){const wb=XLSX.read(buf,{type:"array",cellDates:true});const ws=wb.Sheets[wb.SheetNames[0]];return XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null})}
+function parseResumen(rows){
+  const hi=rows.findIndex(r=>r&&r.some(c=>c==="Cliente")&&r.some(c=>c==="Codigo de Pedido"));
+  if(hi<0)return null;
+  const h=rows[hi],col=n=>h.findIndex(c=>String(c??"").trim()===n);
+  const ix={cl:col("Cliente"),d:col("Domicilio"),t:col("Tipo de Cliente"),f:col("Fecha De Pedido"),c:col("Codigo de Pedido"),z:col("Agrupación"),kg:col("Peso (kg)")};
+  const out=[];
+  for(const r of rows.slice(hi+1)){
+    if(!r||!r[ix.c])continue;
+    out.push({c:String(r[ix.c]).trim(),cl:fixEnc(r[ix.cl]),d:fixEnc(r[ix.d]),t:fixEnc(r[ix.t]),f:toISO(r[ix.f]),z:String(r[ix.z]??"SIN ZONA").replace(/\s+/g," ").trim(),kg:Number(r[ix.kg])||0});
+  }
+  return out;
+}
+function parseDetalle(rows){
+  if(!rows.some(r=>r&&r.some(c=>/^Cliente:/.test(String(c??"")))))return null;
+  const blocks=[];let cur=null;
+  for(const r of rows){
+    if(!r)continue;const a=String(r[1]??"").trim();
+    if(/^Cliente:/.test(a)){
+      const g=k=>{const c=r.find(x=>String(x??"").startsWith(k));return c?String(c).slice(k.length).trim():""};
+      cur={f:toISO(g("Fecha De Pedido:")),z:g("Agrupación:").replace(/\s+/g," ").trim(),items:[],kg:0};blocks.push(cur);
+    }else if(/^Peso \(kg\):/.test(a)){if(cur)cur.kg=parseFloat(a.split(":")[1])||0}
+    else if(a==="Nro Cliente"||a===""){}
+    else if(cur){cur.items.push([String(a),String(r[2]??""),fixEnc(r[3]),Number(r[5])||0])}
+  }
+  return blocks;
+}
+function cruzarDetalle(remitos,blocks){
+  const used=new Set(),res=new Map();
+  const cand=(b,strict)=>{const cli=b.items[0]?b.items[0][0].split("/")[0]:"";
+    return remitos.filter(r=>!used.has(r.c)&&r.f===b.f&&r.z===b.z&&Math.abs(r.kg-b.kg)<0.02&&(!strict||codeParts(r.c)[1]===cli))};
+  for(const strict of [true,false])blocks.forEach((b,i)=>{if(res.has(i))return;const c=cand(b,strict);if(c.length===1||(c.length&&strict)){res.set(i,c[0].c);used.add(c[0].c)}});
+  blocks.forEach((b,i)=>{if(res.has(i))return;const c=cand(b,false);if(c.length){res.set(i,c[0].c);used.add(c[0].c)}});
+  const byC=new Map(remitos.map(r=>[r.c,r]));let n=0;
+  res.forEach((code,i)=>{const r=byC.get(code);if(r){r.it=blocks[i].items.map(x=>[x[1],x[2],x[3]]);n++}});
+  return {n,total:blocks.length};
+}
+
+async function onFiles(files){
+  let res=null,det=null,names=[];
+  let cliMsg="";
+  for(const f of files){
+    if(/\.csv$/i.test(f.name)){try{const pc=parseClientes(new Uint8Array(await f.arrayBuffer()));
+        if(!pc){toast("El CSV no tiene las columnas Código, Domicilio, Latitud y Longitud.");continue}
+        CLI=pc.lista;S.clientesInfo={archivo:f.name,fecha:new Date().toISOString(),n:pc.lista.length,sin:pc.sin};names.push(f.name);cliMsg=`Clientes con coordenadas: ${pc.lista.length}${pc.sin?` (${pc.sin} sin ubicación cargada en QuadMinds)`:""}.`;
+      }catch(e){toast("No pude leer "+f.name)}continue}
+    try{const rows=rowsOf(new Uint8Array(await f.arrayBuffer()));
+      const d=parseDetalle(rows);if(d){det=d;names.push(f.name);continue}
+      const r=parseResumen(rows);if(r){res=r;names.push(f.name);continue}
+      toast("No reconozco el formato de "+f.name);
+    }catch(e){toast("No pude leer "+f.name+". Probá guardarlo de nuevo como .xlsx.")}
+  }
+  if(!res&&!det&&!CLI)return;
+  if(!res&&!det&&cliMsg){await guardarCLI();const n=geoRemitos(S.remitos);ui.notice=cliMsg+(S.remitos.length?` Ubicados ${n} de ${S.remitos.length} remitos.`:"");await saveRemitos();markDirty();render();return}
+  if(cliMsg)await guardarCLI();else await cargarCLIdb();
+  if(res){
+    const prev=new Set(S.remitos.map(r=>r.c)),now=new Set(res.map(r=>r.c));
+    let salieron=0;for(const c of Object.keys(S.asig))if(!now.has(c)){delete S.asig[c];salieron++}
+    const nuevos={};let auto=0;
+    const fleteDeParada={};for(const r of S.remitos)if(S.asig[r.c]&&now.has(r.c))fleteDeParada[paradaKey(r)]=S.asig[r.c];
+    if(prev.size)for(const r of res)if(!prev.has(r.c)){nuevos[r.c]=1;const fl=fleteDeParada[paradaKey(r)];if(fl){S.asig[r.c]=fl;auto++}}
+    // conservar productos si solo se recarga el resumen
+    const oldIt=new Map(S.remitos.filter(r=>r.it).map(r=>[r.c,r.it]));
+    for(const r of res)if(oldIt.has(r.c))r.it=oldIt.get(r.c);
+    S.remitos=res;S.nuevos=nuevos;
+    S.cargado={fecha:new Date().toISOString(),archivo:names.join(" + "),detalle:false};
+    const salidos=prev.size?[...prev].filter(c=>!now.has(c)).length:0;
+    ui.notice=prev.size?`Archivo actualizado: ${Object.keys(nuevos).length} remitos nuevos${auto?` (${auto} van solos al flete que ya tenía ese destino)`:""}, ${salidos} ya no figuran como no planificados y salieron del plan.`:`Cargados ${res.length} remitos.`;
+  }
+  if(det&&S.remitos.length){const m=cruzarDetalle(S.remitos,det);S.cargado=S.cargado||{fecha:new Date().toISOString(),archivo:""};S.cargado.detalle=true;
+    ui.notice=(ui.notice?ui.notice+" ":"")+`Productos cruzados: ${m.n} de ${m.total} remitos.`;}
+  else if(det)toast("Cargá primero (o junto) el archivo SIN detalle: es el que trae cliente y domicilio.");
+  if(CLI&&S.remitos.length){const n=geoRemitos(S.remitos);ui.notice=(cliMsg?cliMsg+" ":"")+(ui.notice?ui.notice+" ":"")+`Ubicados en el mapa: ${n} de ${S.remitos.length} remitos.`}
+  else if(S.remitos.length)ui.notice=(ui.notice||"")+" Para ver el mapa y el orden de recorrido, cargá también el CSV de clientes de QuadMinds.";
+  ui.sel.clear();
+  await saveRemitos();markDirty();render();
+}
+
+// ---------- persistencia ----------
+function snapshotPlan(){return {fletes:S.fletes,asig:S.asig,nuevos:S.nuevos,base:S.base,clientesInfo:S.clientesInfo,dia:S.dia,actualizado:ultimoLocal||new Date().toISOString()}}
+function lsSave(){try{localStorage.setItem(LS,JSON.stringify(S))}catch(e){}}
+let ultimoLocal="";
+function markDirty(){dirtyPlan=true;ultimoLocal=new Date().toISOString();lsSave();setSaved("Guardando…");clearTimeout(markDirty.t);markDirty.t=setTimeout(flushPlan,700)}
+async function flushPlan(){
+  if(!db){dirtyPlan=false;setSaved("Guardado en este navegador");return}
+  if(saving){pendingSave=true;return}
+  saving=true;
+  try{await db.doc("pre/plan").set(snapshotPlan());setSaved("Guardado")}catch(e){console.error("guardar plan",e);setSaved("No se pudo guardar en la nube ("+(e&&(e.code||e.message)||"error")+"); quedó en este navegador");toast("No se pudo guardar el plan en la nube: "+(e&&(e.code||e.message)||"error")+". Quedó guardado en este navegador.")}
+  saving=false;
+  if(pendingSave){pendingSave=false;flushPlan()}else dirtyPlan=false;
+}
+async function saveRemitos(){
+  lsSave();if(!db)return;
+  try{await db.doc("pre/remitos").set({lista:S.remitos,cargado:S.cargado})}
+  catch(e){toast("El archivo es muy grande para guardarlo con productos; se guarda sin ellos.");
+    try{await db.doc("pre/remitos").set({lista:S.remitos.map(({it,...r})=>r),cargado:S.cargado})}catch(e2){}}
+}
+function setSaved(t){const el=$("#saved");if(el)el.textContent=t}
+
+// ---------- cálculos ----------
+function grupos(list){
+  const m=new Map();
+  for(const r of list){const k=paradaKey(r);if(!m.has(k))m.set(k,{k,d:r.d,loc:localidad(r.d),z:r.z,rs:[]});m.get(k).rs.push(r)}
+  for(const g of m.values()){g.kg=g.rs.reduce((a,r)=>a+r.kg,0);g.maxDias=Math.max(...g.rs.map(r=>dias(r.f)));g.codes=g.rs.map(r=>r.c);
+    g.clientes=[...new Set(g.rs.map(r=>r.cl))];g.nuevo=g.rs.some(r=>S.nuevos[r.c]);const w=g.rs.find(r=>r.ll);g.ll=w?w.ll:null;g.km=g.ll?kmV(baseLL(),g.ll):null}
+  return [...m.values()];
+}
+function fleteColor(i){return `var(${FC[i%FC.length]})`}
+function matchQ(g){const q=ui.q.trim().toLowerCase();if(!q)return true;return g.rs.some(r=>(r.cl+" "+r.d+" "+r.c+" "+r.z).toLowerCase().includes(q))}
+
+// ---------- render ----------
+function paradaHTML(g,opts){
+  const ids=esc(g.codes.join("|"));
+  const who=g.clientes.length>1?`${esc(g.clientes[0])} <span class="tag multi">+${g.clientes.length-1} clientes</span>`:esc(g.clientes[0]);
+  const age=g.maxDias>=6?`<span class="tag veryold" title="Días hábiles desde el pedido">${g.maxDias} días háb.</span>`:g.maxDias>=3?`<span class="tag old" title="Días hábiles desde el pedido">${g.maxDias} días háb.</span>`:`<span class="tag" title="Días hábiles desde el pedido">${g.maxDias} d háb.</span>`;
+  const isOpen=ui.open.has(g.k+(opts.fl||""));
+  let exp="";
+  if(isOpen){exp=`<div class="expand">${g.rs.map(r=>{const [a,b]=codeParts(r.c);return `<div class="rem"><div class="rowx"><span class="code">${esc(a)}<small>_${esc(b)}</small></span><span class="num">${fmtKg(r.kg)} kg · ${esc(r.f.split("-").reverse().join("/"))}</span></div><div>${esc(r.cl)} · <span style="color:var(--muted)">${esc(r.t)}</span>${S.nuevos[r.c]?' <span class="tag new">nuevo</span>':""}</div>${r.it&&r.it.length?`<ul>${r.it.map(i=>`<li>${esc(i[2])} × ${esc(i[1])} <span class="num">(${esc(i[0])})</span></li>`).join("")}</ul>`:""}${opts.fl?`<button class="link" data-act="unone" data-c="${esc(r.c)}">Devolver este remito a sin asignar</button>`:""}</div>`}).join("")}</div>`}
+  return `<div class="parada" draggable="true" data-codes="${ids}" data-k="${esc(g.k+(opts.fl||""))}">
+    ${opts.fl?`<span class="ord">${opts.n}</span>`:`<input type="checkbox" aria-label="Seleccionar parada" data-sel="${esc(g.k)}" ${ui.sel.has(g.k)?"checked":""}>`}
+    <span class="who">${who}</span>
+    <span class="kg">${fmtKg(g.kg)} kg${opts.fl?` <button class="x" title="Devolver a sin asignar" data-act="unassign" data-codes="${ids}">×</button>`:""}</span>
+    <span class="where">${esc(g.loc)} · ${esc(g.d.split(",")[0])}</span>
+    <span class="tags">${g.ll?`<span class="tag" title="Distancia aproximada desde ${esc(S.base.nombre)}">≈${Math.round(g.km)} km</span>`:(S.clientesInfo||CLI?`<span class="tag nogeo" title="No se encontró en el listado de clientes">sin ubicación</span>`:"")}${g.rs.length>1?`<span class="tag multi">${g.rs.length} remitos</span>`:`<span class="tag">1 remito</span>`}${opts.fl||opts.showZ?`<span class="tag">${esc(g.z.replace(/^ZONA /,""))}</span>`:""}${age}${g.nuevo?'<span class="tag new">nuevo</span>':""}<button class="link" data-act="toggle" data-k="${esc(g.k+(opts.fl||""))}">${isOpen?"ocultar":"ver remitos"}</button></span>
+    ${exp}</div>`;
+}
+function fleteOptions(sel){return `<option value="">Mover a…</option>`+S.fletes.map(f=>`<option value="${f.id}">${esc(f.nombre)}</option>`).join("")}
+
+// ---------- sugerir armado ----------
+function kmRuta(list){return list.length?ruta(list).km:0}
+// recorridos de una zona con el método de ahorros (Clarke-Wright), sin pasar la capacidad
+function rutasAhorro(paradas,lim){
+  const B=baseLL(),con=paradas.filter(g=>g.ll),sin=paradas.filter(g=>!g.ll);
+  const pares=[];
+  for(let i=0;i<con.length;i++)for(let j=i+1;j<con.length;j++){const a=con[i],b=con[j];pares.push([hav(B,a.ll)+hav(B,b.ll)-hav(a.ll,b.ll),i,j])}
+  pares.sort((x,y)=>y[0]-x[0]);
+  const rutas=con.map((g,i)=>({ids:[i],kg:g.kg})),de=con.map((g,i)=>rutas[i]);
+  for(const [sv,i,j] of pares){const A=de[i],Bq=de[j];if(A===Bq||A.kg+Bq.kg>lim)continue;
+    const aIni=A.ids[0]===i,aFin=A.ids[A.ids.length-1]===i,bIni=Bq.ids[0]===j,bFin=Bq.ids[Bq.ids.length-1]===j;let ids=null;
+    if(aFin&&bIni)ids=A.ids.concat(Bq.ids);else if(bFin&&aIni)ids=Bq.ids.concat(A.ids);else if(aFin&&bFin)ids=A.ids.concat(Bq.ids.slice().reverse());else if(aIni&&bIni)ids=A.ids.slice().reverse().concat(Bq.ids);
+    if(!ids)continue;const N={ids,kg:A.kg+Bq.kg};A.dead=Bq.dead=true;rutas.push(N);for(const x of ids)de[x]=N}
+  const res=rutas.filter(r=>!r.dead).map(r=>({gs:r.ids.map(x=>con[x]),kg:r.kg}));
+  // paradas sin ubicación: a la ruta de la zona donde entren (o una propia)
+  for(const g of sin){const r=res.find(r=>r.kg+g.kg<=lim);if(r){r.gs.push(g);r.kg+=g.kg}else res.push({gs:[g],kg:g.kg})}
+  return res;
+}
+// mejor reparto de una zona: el que use menos fletes y, a igualdad, menos km
+function rutasZona(paradas,lim){
+  const cands=[rutasAhorro(paradas,lim)];
+  if(lim!==Infinity){
+    // alternativa: llenar fletes por peso (primero lo más pesado) y después ordenar por cercanía
+    const bins=[];for(const g of paradas.slice().sort((a,b)=>b.kg-a.kg)){const b=bins.filter(b=>b.kg+g.kg<=lim).sort((a,b)=>a.gs.length&&g.ll&&b.gs[0].ll?hav(a.gs[0].ll||g.ll,g.ll)-hav(b.gs[0].ll||g.ll,g.ll):0)[0];if(b){b.gs.push(g);b.kg+=g.kg}else bins.push({gs:[g],kg:g.kg})}
+    cands.push(bins);
+  }
+  for(const c of cands)mejorarZona(c,lim);
+  const km=c=>c.reduce((a,r)=>a+kmRuta(r.gs),0);
+  cands.sort((a,b)=>a.length-b.length||km(a)-km(b));
+  return cands[0];
+}
+// mover o intercambiar paradas entre fletes de la misma zona mientras baje el total de km
+function mejorarZona(rs,lim){
+  if(rs.length<2)return;
+  for(let pass=0;pass<4;pass++){let mov=false;
+    for(const a of rs)for(const g of a.gs.slice()){if(!g.ll)continue;
+      const kaA=kmRuta(a.gs),kaS=kmRuta(a.gs.filter(x=>x!==g));
+      for(const b of rs){if(b===a)continue;
+        if(b.kg+g.kg<=lim){const d=(kaA-kaS)-(kmRuta(b.gs.concat([g]))-kmRuta(b.gs));if(d>0.5){a.gs.splice(a.gs.indexOf(g),1);a.kg-=g.kg;b.gs.push(g);b.kg+=g.kg;mov=true;break}}
+        else{for(const h of b.gs){if(!h.ll)continue;if(a.kg-g.kg+h.kg>lim||b.kg-h.kg+g.kg>lim)continue;
+          const nA=a.gs.filter(x=>x!==g).concat([h]),nB=b.gs.filter(x=>x!==h).concat([g]);
+          const d=kaA+kmRuta(b.gs)-kmRuta(nA)-kmRuta(nB);if(d>0.5){a.gs=nA;b.gs=nB;a.kg+=h.kg-g.kg;b.kg+=g.kg-h.kg;mov=true;break}}if(mov)break}}
+      if(mov)break}
+    if(!mov)break}
+  for(let i=rs.length-1;i>=0;i--)if(!rs[i].gs.length)rs.splice(i,1);
+}
+function necesidadDia(capG){
+  const libresR=S.remitos.filter(r=>!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c]));
+  const porZ={};for(const r of S.remitos)if(enDia(r.z)){const k=zk(r.z);(porZ[k]=porZ[k]||{kg:0,libre:0});porZ[k].kg+=r.kg}
+  for(const r of libresR)if(enDia(r.z))porZ[zk(r.z)].libre+=r.kg;
+  return porZ;
+}
+function sugerir(nG,capG,nC,capC,modo){
+  S.fletes=S.fletes.filter(f=>S.remitos.some(r=>S.asig[r.c]===f.id)); // los fletes vacíos no ocupan camión
+  if(modo==="todo"){S.asig={};S.fletes=[]}
+  const libresR=S.remitos.filter(r=>(!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c]))&&enDia(r.z));
+  const porZona={};for(const g of grupos(libresR))(porZona[zk(g.z)]=porZona[zk(g.z)]||[]).push(g);
+  const capOf=f=>f.cap||capG||Infinity;
+  const fz=f=>zonaFlete(f);
+  // 1) completar fletes que ya existen de esa misma zona
+  const enFlete=f=>S.remitos.filter(r=>S.asig[r.c]===f.id);
+  const kgF=f=>enFlete(f).reduce((a,r)=>a+r.kg,0);
+  for(const z of Object.keys(porZona)){
+    const fl=S.fletes.filter(f=>fz(f)===z);if(!fl.length)continue;
+    const resto=[];
+    for(const g of porZona[z].sort((a,b)=>b.maxDias-a.maxDias)){
+      let best=null,bd=1e12;
+      for(const f of fl){if(kgF(f)+g.kg>capOf(f))continue;const base=grupos(enFlete(f));const d=g.ll?kmRuta(base.concat([g]))-kmRuta(base):0;if(d<bd){bd=d;best=f}}
+      if(best)for(const c of g.codes)S.asig[c]=best.id;else resto.push(g)}
+    porZona[z]=resto;
+  }
+  // 2) armar recorridos nuevos por zona
+  let rutas=[];
+  for(const z of Object.keys(porZona)){if(!porZona[z].length)continue;
+    for(const r of rutasZona(porZona[z],capG||Infinity)){r.zona=z;r.prio=Math.max(...r.gs.map(g=>g.maxDias));rutas.push(r)}}
+  // camiones disponibles (descontando los fletes que ya están armados)
+  const delDiaF=S.fletes.filter(f=>enDia(fz(f)));
+  const usadosG=delDiaF.filter(f=>(f.cap||capG)>capC).length,usadosC=delDiaF.length-usadosG;
+  const camiones=[];for(let i=0;i<Math.max(0,nG-usadosG);i++)camiones.push(capG||Infinity);for(let i=0;i<Math.max(0,nC-usadosC);i++)camiones.push(capC||Infinity);
+  camiones.sort((a,b)=>a-b);
+  // prioridad: recorridos con pedidos más viejos primero, después los más pesados
+  // prioridad: primero las zonas del día y después Transporte; dentro de cada grupo, pedidos más viejos y más pesados
+  rutas.sort((a,b)=>(SIEMPRE.includes(a.zona)-SIEMPRE.includes(b.zona))||b.prio-a.prio||b.kg-a.kg);
+  const cuenta={};S.fletes.forEach(f=>{const z=fz(f);cuenta[z]=(cuenta[z]||0)+1});
+  let sobran=0,n=0;
+  // 1) elegir qué recorridos salen (los de pedidos más viejos primero) según los camiones que hay
+  const grandes=camiones.filter(c=>c>capC).length;let libG=grandes,libC=camiones.length-grandes;const salen=[];
+  for(const r of rutas){
+    if(r.kg>capC){if(libG>0){libG--;salen.push(r)}else sobran+=r.gs.length}
+    else if(libC>0){libC--;salen.push(r)}else if(libG>0){libG--;salen.push(r)}
+    else sobran+=r.gs.length}
+  // 2) el camión chico va al recorrido más pesado que entre; el resto a los grandes
+  const nChicos=camiones.length-grandes;const chicos=new Set(salen.filter(r=>r.kg<=capC).sort((a,b)=>b.kg-a.kg).slice(0,nChicos));
+  for(const r of salen){const cap=chicos.has(r)?capC:capG;cuenta[r.zona]=(cuenta[r.zona]||0)+1;
+    const f={id:"f"+Date.now().toString(36)+Math.random().toString(36).slice(2,5),nombre:zTit(r.zona)+(cuenta[r.zona]>1?" ("+cuenta[r.zona]+")":""),cap:cap||0,zona:r.zona};
+    S.fletes.push(f);for(const g of r.gs)for(const c of g.codes){S.asig[c]=f.id;n++}}
+  // ordenar fletes por agenda: transporte al final
+  S.fletes.sort((a,b)=>(SIEMPRE.includes(fz(a))-SIEMPRE.includes(fz(b)))||fz(a).localeCompare(fz(b)));
+  let km=0;for(const f of S.fletes)km+=kmRuta(grupos(enFlete(f)));
+  return {n,sobran,km,nF:S.fletes.length};
+}
+function sugHTML(){
+  const porZ=necesidadDia(ui.capG);const zs=zonasDia(S.dia);
+  // simulación: cuántos recorridos salen por zona con la capacidad grande
+  const delDiaR=S.remitos.filter(r=>enDia(r.z));const gz={};for(const g of grupos(delDiaR))(gz[zk(g.z)]=gz[zk(g.z)]||[]).push(g);
+  let nec=0,livianos=0;const filas=zs.map(z=>{const d=porZ[z]||{kg:0};const rr=gz[z]?rutasZona(gz[z],ui.capG||Infinity):[];nec+=rr.length;livianos+=rr.filter(r=>r.kg<=ui.capC).length;return `<span class="tag">${esc(zTit(z))}: <b class="num">${fmtKg(d.kg)} kg</b>${rr.length?` · ${rr.length} flete${rr.length>1?"s":""}`:""}</span>`}).join(" ");
+  const nCdef=ui.sugC??Math.min(1,livianos),nGdef=ui.sugG??Math.max(0,nec-nCdef);
+  return `<div class="sugbox"><h2>Sugerir armado para el ${esc(DIAS[S.dia])}</h2>
+    <p>Zonas del día, kilos y fletes que necesita cada una (para ${fmtKg(delDiaR.reduce((a,r)=>a+r.kg,0))} kg en total):</p><div class="zchips">${filas}</div>
+    <div class="row"><label for="sugN">Fletes de ${ui.capG} kg <input type="number" id="sugN" min="0" max="20" value="${nGdef}"></label>
+    <label for="sugC">Fletes de ${ui.capC} kg <input type="number" id="sugC" min="0" max="6" value="${nCdef}"></label>
+    <label for="capG">Capacidad grande (kg) <input type="number" id="capG" min="0" step="50" value="${ui.capG}"></label>
+    <label for="capC">Capacidad chico (kg) <input type="number" id="capC" min="0" step="50" value="${ui.capC}"></label></div>
+    <div class="row"><label><input type="radio" name="sugModo" value="libres" ${ui.sugModo==="libres"?"checked":""}> Completar (respeta los fletes que ya armaste)</label>
+    <label><input type="radio" name="sugModo" value="todo" ${ui.sugModo==="todo"?"checked":""}> Rehacer el día desde cero</label></div>
+    <p>Cada flete lleva una sola zona. Dentro de cada zona junta las paradas que conviene recorrer seguidas desde ${esc(S.base.nombre)} sin pasar la capacidad; el flete de ${ui.capC} kg se usa para el recorrido más liviano que entre. Si faltan fletes, primero salen las zonas del día y después Transporte 1 y 2; dentro de cada grupo, los recorridos con pedidos más viejos. Las zonas que no salen el ${esc(DIAS[S.dia])} no se tocan.</p>
+    <div class="row"><button class="btn primary" data-act="sugok">Armar propuesta</button><button class="btn" data-act="sugno">Cancelar</button></div></div>`;
+}
+const REFS=[["Escobar",-34.349,-58.795],["Campana",-34.164,-59.033],["Pilar",-34.458,-58.914],["Tigre",-34.426,-58.580],["San Isidro",-34.471,-58.528],["CABA",-34.604,-58.382],["San Martín",-34.575,-58.537],["Morón",-34.653,-58.620],["Moreno",-34.651,-58.789],["Luján",-34.570,-59.105],["San Justo",-34.683,-58.561],["Lomas de Zamora",-34.761,-58.406],["Quilmes",-34.720,-58.254],["Ezeiza",-34.853,-58.523],["La Plata",-34.921,-57.955],["Berazategui",-34.765,-58.212],["Gral. Rodríguez",-34.608,-58.952],["Zárate",-34.098,-59.029]];
+function mapaHTML(gl){
+  const all=grupos(S.remitos.filter(r=>enDia(r.z)||S.asig[r.c])).filter(g=>g.ll);
+  if(!all.length)return `<div class="mapwrap"><div class="map-h"><h2>Mapa</h2></div><div class="mapnote">Cargá el CSV de clientes exportado de QuadMinds (botón “Cargar archivos”) para ubicar las paradas, ordenar el recorrido y estimar los km.</div></div>`;
+  const B=baseLL(),near=all.filter(g=>hav(B,g.ll)<160),lejos=all.length-near.length;
+  let la=[B[0],...near.map(g=>g.ll[0])],lo=[B[1],...near.map(g=>g.ll[1])];
+  let y0=Math.min(...la),y1=Math.max(...la),x0=Math.min(...lo),x1=Math.max(...lo);
+  const pad=0.03;y0-=pad;y1+=pad;x0-=pad;x1+=pad;
+  const kx=Math.cos(((y0+y1)/2)*Math.PI/180),W=1000,sc=W/((x1-x0)*kx),H=Math.max(260,Math.min(700,Math.round((y1-y0)*sc)));
+  const sc2=Math.min(sc,H/(y1-y0)),ox=(W-(x1-x0)*kx*sc2)/2;
+  const P=ll=>[ox+(ll[1]-x0)*kx*sc2,(y1-ll[0])*sc2];
+  const inB=ll=>ll[0]>=y0&&ll[0]<=y1&&ll[1]>=x0&&ll[1]<=x1;
+  let svg=`<svg class="mapsvg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Mapa de paradas desde ${esc(S.base.nombre)}">`;
+  for(const r of REFS){if(!inB([r[1],r[2]]))continue;const [x,y]=P([r[1],r[2]]);svg+=`<circle class="refdot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2"/><text class="ref" x="${(x+5).toFixed(1)}" y="${(y-4).toFixed(1)}">${esc(r[0])}</text>`}
+  const fIdx=new Map(S.fletes.map((f,i)=>[f.id,i]));
+  S.fletes.forEach((f,i)=>{const gs=grupos(S.remitos.filter(r=>S.asig[r.c]===f.id)).filter(g=>g.ll);if(!gs.length)return;
+    const o=ruta(gs).orden;const pts=[B,...o.map(g=>g.ll),B].map(P);
+    svg+=`<polyline class="route" stroke="${fleteColor(i)}" points="${pts.map(p=>p[0].toFixed(1)+","+p[1].toFixed(1)).join(" ")}"/>`});
+  const libres=new Set(gl.map(g=>g.k));
+  const ptsHTML=[];
+  for(const g of near){const [x,y]=P(g.ll);const free=!g.rs.some(r=>S.asig[r.c]&&fIdx.has(S.asig[r.c]));void libres;
+    if(free&&!enDia(g.z))continue;const fid=free?null:S.asig[g.rs[0].c];const i=fIdx.get(fid);
+    const col=free?"var(--muted)":fleteColor(i??0),sel=ui.sel.has(g.k);const r=Math.min(9,4+Math.sqrt(g.kg)/4);
+    const info=`${g.clientes.join(" / ")} · ${g.loc} · ${fmtKg(g.kg)} kg${free?"":" · "+(S.fletes[i]?.nombre||"")}`;
+    ptsHTML.push(`<circle class="pt" data-act="pt" data-k="${esc(g.k)}" data-free="${free?1:0}" data-info="${esc(info)}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}" fill="${free?"var(--panel)":col}" stroke="${sel?"var(--fg)":col}" stroke-width="${sel?3:2}"><title>${esc(info)}</title></circle>`)}
+  svg+=ptsHTML.join("");
+  const [bx,by]=P(B);svg+=`<rect class="base" x="${(bx-7).toFixed(1)}" y="${(by-7).toFixed(1)}" width="14" height="14"/><text class="baselbl" x="${(bx+10).toFixed(1)}" y="${(by+4).toFixed(1)}">${esc(S.base.nombre)}</text></svg>`;
+  return `<div class="mapwrap"><div class="map-h"><h2>Mapa de paradas</h2>
+    <div class="legend"><span><i style="background:var(--panel);border:2px solid var(--muted)"></i>Sin asignar del día (tocá para seleccionar)</span>${S.fletes.map((f,i)=>`<span><i style="background:${fleteColor(i)}"></i>${esc(f.nombre)}</span>`).join("")}</div>
+    <div class="basebox"><label for="baseIn">Base (lat, long):</label><input id="baseIn" value="${S.base.lat}, ${S.base.lng}"></div></div>
+    <div style="overflow-x:auto">${svg}</div>
+    <div class="mapnote">Las líneas muestran el orden sugerido saliendo de la base y volviendo. Los km son estimados (línea recta × ${VIAL}); el recorrido final lo optimiza QuadMinds.${lejos?` ${lejos} paradas quedan fuera del mapa por estar a más de 160 km.`:""}${S.clientesInfo?` Clientes: ${esc(S.clientesInfo.archivo)}.`:""}</div></div>`;
+}
+function render(){
+  const main=$("#main"),R=S.remitos;
+  const scrollPool=$(".pool")?.scrollTop||0;
+  $("#sub").textContent=S.cargado?`Archivo: ${S.cargado.archivo||"—"} · cargado ${new Date(S.cargado.fecha).toLocaleString("es-AR",{dateStyle:"short",timeStyle:"short"})}${S.cargado.detalle?" · con productos":""}`:"Remitos no planificados, ordenados por flete antes de pasar a QuadMinds";
+  $("#notices").innerHTML=(ui.notice?`<div class="notice"><span>${esc(ui.notice)}</span><span style="display:flex;gap:6px">${ui.undo?`<button class="btn small" data-act="undo">Deshacer propuesta</button>`:""}<button class="btn small ghost" data-act="closenotice">Cerrar</button></span></div>`:"")+(ui.sug&&R.length?sugHTML():"");
+  if(!R.length){
+    main.innerHTML=`<div class="empty" id="dz"><h2>Todavía no hay remitos cargados</h2>
+      <ol><li>Exportá el listado de <b>no planificados</b> (el archivo SIN detalle; el CON detalle es opcional y suma los productos).</li>
+      <li>Sumá el <b>CSV de clientes</b> de QuadMinds para ver el mapa, el orden de recorrido y los km.</li><li>Arrastralos acá o tocá <b>Cargar archivos</b>.</li>
+      <li>Creá los fletes tentativos y pasá cada parada a su flete. El plan queda guardado para el día siguiente.</li></ol>
+      <label class="btn primary" for="fileIn">Elegir archivo</label></div>`;
+    return;
+  }
+  const libresTodos=R.filter(r=>!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c]));
+  const libres=libresTodos.filter(r=>enDia(r.z)),otrosR=libresTodos.filter(r=>!enDia(r.z));
+  const gl=grupos(libres);
+  const delDia=R.filter(r=>enDia(r.z)),diaKg=delDia.reduce((a,r)=>a+r.kg,0);
+  const zonas=[...new Set(R.filter(r=>enDia(r.z)).map(r=>r.z))].sort();
+  const totKg=R.reduce((a,r)=>a+r.kg,0),libKg=libres.reduce((a,r)=>a+r.kg,0);
+  const viejos=gl.filter(g=>g.maxDias>=3).length;void totKg;
+  let html=`<div class="strip">
+    <div class="cell"><span class="k">Planificando</span><span class="v">${esc(DIAS[S.dia])} ${proxHabilFecha().toLocaleDateString("es-AR",{day:"2-digit",month:"2-digit"})}</span></div>
+    <div class="cell"><span class="k">Zonas del día</span><span style="font-size:13px;font-weight:600;max-width:34ch">${zonasDia(S.dia).map(zTit).join(", ")}</span></div>
+    <div class="cell"><span class="k">Remitos del día</span><span class="v">${delDia.length} · ${fmtKg(diaKg)} kg</span></div>
+    <div class="cell"><span class="k">Sin asignar del día</span><span class="v">${libres.length} rem · ${fmtKg(libKg)} kg</span></div>
+
+    ${viejos?`<div class="cell"><span class="k">Sin asignar con 3+ días hábiles</span><span class="v" style="color:var(--warn)">${viejos}</span></div>`:""}
+  </div>${ui.mapa?mapaHTML(gl):""}<div class="board">`;
+  // pool
+  const vis=gl.filter(g=>(!ui.zona||g.z===ui.zona)&&(!ui.soloNuevos||g.nuevo)&&matchQ(g));
+  const byZ={};for(const g of vis)(byZ[g.z]=byZ[g.z]||[]).push(g);
+  html+=`<section class="panel"><div class="panel-h"><h2>Sin asignar · ${esc(DIAS[S.dia])} <span class="num">${gl.length} paradas</span></h2>
+    <div class="filters"><input type="search" id="q" placeholder="Buscar cliente, calle, código…" value="${esc(ui.q)}">
+    <select id="zf"><option value="">Todas las zonas</option>${zonas.map(z=>`<option ${z===ui.zona?"selected":""}>${esc(z)}</option>`).join("")}</select>
+    <select id="ordsel" aria-label="Ordenar"><option value="zona" ${ui.orden==="zona"?"selected":""}>Por zona</option><option value="km" ${ui.orden==="km"?"selected":""}>Por distancia a la base</option></select>
+    <label class="chk"><input type="checkbox" id="sn" ${ui.soloNuevos?"checked":""}> Solo nuevos</label></div>
+    ${ui.sel.size?`<div class="bulk"><b>${ui.sel.size}</b> seleccionadas <select id="bulkTo">${fleteOptions()}</select><button class="btn small" data-act="clearsel">Quitar selección</button></div>`:""}
+    </div><div class="pool" data-drop="">`;
+  if(!vis.length)html+=`<div class="empty-drop">${gl.length?"Nada coincide con el filtro.":"Todo asignado. Arrastrá acá una parada para devolverla."}</div>`;
+  if(ui.orden==="km"){html+=`<div class="zona">${vis.slice().sort((a,b)=>(a.km??1e9)-(b.km??1e9)).map(g=>paradaHTML(g,{showZ:true})).join("")}</div>`}
+  else for(const z of Object.keys(byZ).sort()){
+    const gs=byZ[z].sort((a,b)=>a.loc.localeCompare(b.loc)||b.kg-a.kg);
+    const zk=gs.reduce((a,g)=>a+g.kg,0),zr=gs.reduce((a,g)=>a+g.rs.length,0);
+    html+=`<div class="zona"><div class="zona-h"><span class="zn">${esc(z)}</span><span class="num">${zr} rem · ${fmtKg(zk)} kg</span>
+      ${S.fletes.length?`<select data-zonato="${esc(z)}" aria-label="Mandar toda la zona a un flete">${fleteOptions().replace("Mover a…","Toda la zona a…")}</select>`:""}</div>
+      ${gs.map(g=>paradaHTML(g,{})).join("")}</div>`;
+  }
+  html+=`</div></section><section class="fletes">`;
+  S.fletes.forEach((f,i)=>{
+    const rs=R.filter(r=>S.asig[r.c]===f.id),gs=grupos(rs);
+    const kg=rs.reduce((a,r)=>a+r.kg,0),pct=f.cap?Math.min(100,kg/f.cap*100):0,over=f.cap&&kg>f.cap;
+    const zs=[...new Set(rs.map(r=>zTit(r.z)))];const mezcla=zs.length>1,fuera=rs.some(r=>!enDia(r.z));
+    const rt=ruta(gs);const gso=rt.orden;
+    html+=`<article class="flete" style="--fc:${fleteColor(i)}" data-drop="${f.id}">
+      <div class="flete-h"><div class="row1"><input class="name" id="fn-${f.id}" data-fname="${f.id}" value="${esc(f.nombre)}" aria-label="Nombre del flete">
+        ${ui.confirmDel===f.id?`<span class="confirm">¿Borrar? <button class="btn small danger" data-act="delok" data-f="${f.id}">Sí</button><button class="btn small" data-act="delno">No</button></span>`:`<button class="x" title="Borrar flete" data-act="del" data-f="${f.id}">×</button>`}</div>
+        <div class="metrics" style="grid-template-columns:repeat(4,1fr)"><div><span class="k">Paradas</span><span class="v">${gs.length}</span></div><div><span class="k">Remitos</span><span class="v">${rs.length}</span></div><div><span class="k">Kg</span><span class="v" ${over?'style="color:var(--bad)"':""}>${fmtKg(kg)}</span></div><div><span class="k" title="Ida y vuelta desde la base, estimado">Km aprox.</span><span class="v">${rt.km?Math.round(rt.km):"—"}</span></div></div>
+        <div class="cap"><label for="cap-${f.id}">Capacidad</label><input id="cap-${f.id}" data-fcap="${f.id}" inputmode="numeric" value="${f.cap||""}" placeholder="kg"><div class="bar ${over?"over":""}"><i style="width:${pct}%"></i></div></div>
+        ${zs.length?`<div class="zchips">${zs.map(z=>`<span class="tag">${esc(z)}</span>`).join("")}${mezcla?`<span class="tag veryold">mezcla zonas</span>`:""}${fuera?`<span class="tag old">tiene zonas que no salen el ${esc(DIAS[S.dia])}</span>`:""}</div>`:""}
+      </div><div class="flete-list">${gso.length?gso.map((g,n)=>paradaHTML(g,{fl:f.id,n:n+1})).join(""):`<div class="empty-drop">Arrastrá paradas acá o usá “Mover a…”</div>`}</div></article>`;
+  });
+  html+=`<button class="empty-drop btn" data-act="addflete" style="min-height:120px;align-self:start">+ Agregar flete</button>`;
+  html+=`</section></div>
+    <div style="display:flex;justify-content:flex-end">${ui.confirmReset?`<span class="confirm">Esto borra los remitos cargados y los fletes. <button class="btn small danger" data-act="resetok">Borrar todo</button><button class="btn small" data-act="resetno">Cancelar</button></span>`:`<button class="btn small ghost" data-act="reset">Empezar de cero</button>`}</div>`;
+  main.innerHTML=html;
+  const p=$(".pool");if(p)p.scrollTop=scrollPool;
+}
+
+// ---------- acciones ----------
+function assign(codes,fid){for(const c of codes){if(fid)S.asig[c]=fid;else delete S.asig[c]}markDirty();render()}
+function codesOfKeys(keys){const R=S.remitos.filter(r=>!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c]));return R.filter(r=>keys.has(paradaKey(r))).map(r=>r.c)}
+function addFlete(){const n=S.fletes.length+1;S.fletes.push({id:"f"+Date.now().toString(36),nombre:"Flete "+n,cap:1000});markDirty();render()}
+function toast(t){const el=$("#toast");el.textContent=t;el.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>el.hidden=true,4000)}
+
+document.addEventListener("click",e=>{
+  const b=e.target.closest("[data-act]");if(!b)return;const a=b.dataset.act;
+  if(a==="pt"){const k=b.dataset.k;if(b.dataset.free==="1"){ui.sel.has(k)?ui.sel.delete(k):ui.sel.add(k);render()}else{toast(b.dataset.info)}return}
+  if(a==="otras"){ui.verOtras=!ui.verOtras;render();return}
+  if(a==="sugno"){ui.sug=false;render();return}
+  if(a==="sugok"){try{
+    if(!S.remitos.some(r=>r.ll)){toast("Para sugerir el armado hace falta el CSV de clientes con las ubicaciones.");return}
+    if(!S.remitos.some(r=>enDia(r.z))){toast("No hay remitos de las zonas del "+DIAS[S.dia]+".");return}
+    const nG=Math.min(20,Math.max(0,parseInt($("#sugN").value)||0)),nC=Math.min(6,Math.max(0,parseInt($("#sugC").value)||0));
+    const capG=Math.max(0,parseFloat($("#capG").value)||0),capC=Math.max(0,parseFloat($("#capC").value)||0);
+    if(nG+nC<1){toast("Indicá al menos un flete.");return}
+    const modo=document.querySelector("input[name=sugModo]:checked")?.value||"libres";
+    ui.sugG=nG;ui.sugC=nC;ui.capG=capG;ui.capC=capC;ui.sugModo=modo;
+    ui.undo=JSON.stringify({fletes:S.fletes,asig:S.asig});
+    const r=sugerir(nG,capG,nC,capC,modo);ui.sug=false;
+    ui.notice=`Propuesta para el ${DIAS[S.dia]}: ${r.nF} fletes, ${r.n} remitos repartidos, ≈${Math.round(r.km)} km en total.${r.sobran?` ${r.sobran} paradas no entraron en los fletes disponibles y quedaron sin asignar.`:""}`;
+    markDirty();render();window.scrollTo({top:0,behavior:"smooth"})}catch(err){console.error(err);toast("No se pudo armar la propuesta: "+(err&&err.message||err))}return}
+  if(a==="undo"){if(ui.undo){const u=JSON.parse(ui.undo);S.fletes=u.fletes;S.asig=u.asig;ui.undo=null;ui.notice="Se deshizo la propuesta.";markDirty();render()}return}
+  if(a==="toggle"){const k=b.dataset.k;ui.open.has(k)?ui.open.delete(k):ui.open.add(k);render()}
+  else if(a==="unassign")assign(b.dataset.codes.split("|"),null);
+  else if(a==="unone")assign([b.dataset.c],null);
+  else if(a==="clearsel"){ui.sel.clear();render()}
+  else if(a==="addflete")addFlete();
+  else if(a==="del"){ui.confirmDel=b.dataset.f;render()}
+  else if(a==="delno"){ui.confirmDel=null;render()}
+  else if(a==="delok"){const id=b.dataset.f;S.fletes=S.fletes.filter(f=>f.id!==id);for(const c in S.asig)if(S.asig[c]===id)delete S.asig[c];ui.confirmDel=null;markDirty();render()}
+  else if(a==="reset"){ui.confirmReset=true;render()}
+  else if(a==="resetno"){ui.confirmReset=false;render()}
+  else if(a==="resetok"){S={remitos:[],cargado:null,fletes:[],asig:{},nuevos:{}};ui.confirmReset=false;saveRemitos();markDirty();render()}
+  else if(a==="closenotice"){ui.notice=null;ui.undo=null;render()}
+});
+document.addEventListener("change",e=>{
+  const t=e.target;
+  if(t.dataset.sel!==undefined){t.checked?ui.sel.add(t.dataset.sel):ui.sel.delete(t.dataset.sel);render()}
+  else if(t.id==="bulkTo"&&t.value){const codes=codesOfKeys(ui.sel);ui.sel.clear();assign(codes,t.value)}
+  else if(t.dataset.zonato&&t.value){const z=t.dataset.zonato;const codes=S.remitos.filter(r=>r.z===z&&(!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c]))).map(r=>r.c);assign(codes,t.value)}
+  else if(t.id==="zf"){ui.zona=t.value;render()}
+  else if(t.id==="sn"){ui.soloNuevos=t.checked;render()}
+  else if(t.id==="ordsel"){ui.orden=t.value;render()}
+  else if(t.id==="diaSel"){S.dia=parseInt(t.value);ui.sel.clear();ui.zona="";ui.sugG=null;markDirty();render()}
+  else if(t.id==="baseIn"){const m=t.value.match(/(-?\d+[.,]\d+)\s*[,; ]\s*(-?\d+[.,]\d+)/);if(m){S.base={nombre:S.base.nombre,lat:parseFloat(m[1].replace(",",".")),lng:parseFloat(m[2].replace(",","."))};markDirty();render()}else toast("Pegá las coordenadas como en Google Maps, por ejemplo: -34.3555, -58.7650")}
+  else if(t.dataset.fname){const f=S.fletes.find(f=>f.id===t.dataset.fname);if(f){f.nombre=t.value.trim()||f.nombre;markDirty();render()}}
+  else if(t.dataset.fcap){const f=S.fletes.find(f=>f.id===t.dataset.fcap);if(f){f.cap=Math.max(0,parseFloat(t.value.replace(",","."))||0);markDirty();render()}}
+  else if(t.id==="fileIn"&&t.files.length){onFiles([...t.files]);t.value=""}
+});
+document.addEventListener("input",e=>{if(e.target.id==="q"){ui.q=e.target.value;clearTimeout(render.qt);render.qt=setTimeout(()=>{render();const q=$("#q");if(q){q.focus();q.setSelectionRange(q.value.length,q.value.length)}},200)}});
+$("#addFlete").onclick=addFlete;
+$("#sugBtn").onclick=()=>{ui.sug=!ui.sug;if(!S.remitos.length){toast("Primero cargá los remitos.");ui.sug=false}render();if(ui.sug){window.scrollTo({top:0,behavior:"smooth"});$("#sugN")?.focus({preventScroll:true})}};
+$("#mapBtn").onclick=()=>{ui.mapa=!ui.mapa;render()};
+// drag & drop de paradas y de archivos
+let dragCodes=null;
+document.addEventListener("dragstart",e=>{const p=e.target.closest?.(".parada");if(!p)return;dragCodes=p.dataset.codes.split("|");p.classList.add("dragging");e.dataTransfer.effectAllowed="move";try{e.dataTransfer.setData("text/plain",p.dataset.codes)}catch(_){}});
+document.addEventListener("dragend",e=>{document.querySelectorAll(".dragging,.drop-hot,.dropzone-hot").forEach(x=>x.classList.remove("dragging","drop-hot","dropzone-hot"));dragCodes=null});
+document.addEventListener("dragover",e=>{
+  const isFile=e.dataTransfer&&[...e.dataTransfer.types].includes("Files");
+  if(isFile){e.preventDefault();$("#dz")?.classList.add("dropzone-hot");return}
+  const t=e.target.closest?.("[data-drop]");if(!t||!dragCodes)return;e.preventDefault();
+  document.querySelectorAll(".drop-hot").forEach(x=>x!==t&&x.classList.remove("drop-hot"));t.classList.add("drop-hot");
+});
+document.addEventListener("drop",e=>{
+  if(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files.length){e.preventDefault();onFiles([...e.dataTransfer.files]);return}
+  const t=e.target.closest?.("[data-drop]");if(!t||!dragCodes)return;e.preventDefault();
+  const fid=t.dataset.drop||null;const c=dragCodes;dragCodes=null;assign(c,fid);
+});
+
+// ---------- exportar ----------
+function sheetName(s,used){let n=String(s).replace(/[\[\]:*?\/\\]/g," ").slice(0,31)||"Flete";let b=n,i=2;while(used.has(n)){n=(b.slice(0,28)+" "+i++)}used.add(n);return n}
+async function exportar(){
+  if(!S.remitos.length){toast("Primero cargá un archivo.");return}
+  const wb=XLSX.utils.book_new(),used=new Set();
+  const resumen=[["Flete","Paradas","Remitos","Kg","Km aprox. (ida y vuelta)","Capacidad (kg)","Zonas"]];
+  const filas=(rs,ordenRuta)=>{const out=[["Orden","Cliente","Domicilio","Localidad","Zona","Km desde base","Código de pedido","Fecha pedido","Kg","Productos","Listo"]];
+    (ordenRuta?ruta(grupos(rs)).orden:grupos(rs).sort((a,b)=>a.z.localeCompare(b.z)||a.loc.localeCompare(b.loc))).forEach((g,n)=>g.rs.forEach(r=>out.push([n+1,r.cl,r.d,g.loc,r.z,g.km!=null?Math.round(g.km):"",r.c,r.f.split("-").reverse().join("/"),Math.round(r.kg*100)/100,(r.it||[]).map(i=>i[1]+" x"+i[2]).join("; "),""])));return out};
+  for(const f of S.fletes){const rs=S.remitos.filter(r=>S.asig[r.c]===f.id);
+    resumen.push([f.nombre,grupos(rs).length,rs.length,Math.round(rs.reduce((a,r)=>a+r.kg,0)*10)/10,Math.round(ruta(grupos(rs)).km)||"",f.cap||"",[...new Set(rs.map(r=>r.z))].join(", ")]);
+    const ws=XLSX.utils.aoa_to_sheet(filas(rs,true));ws["!cols"]=[{wch:6},{wch:30},{wch:45},{wch:16},{wch:16},{wch:8},{wch:22},{wch:11},{wch:8},{wch:40},{wch:6}];XLSX.utils.book_append_sheet(wb,ws,sheetName(f.nombre,used))}
+  const lib=S.remitos.filter(r=>!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c]));
+  resumen.push(["Sin asignar",grupos(lib).length,lib.length,Math.round(lib.reduce((a,r)=>a+r.kg,0)*10)/10,"","",""]);
+  const wr=XLSX.utils.aoa_to_sheet(resumen);wr["!cols"]=[{wch:22},{wch:8},{wch:8},{wch:10},{wch:12},{wch:14},{wch:60}];
+  XLSX.utils.book_append_sheet(wb,wr,sheetName("Resumen",used));wb.SheetNames.unshift(wb.SheetNames.pop());
+  const ws=XLSX.utils.aoa_to_sheet(filas(lib));XLSX.utils.book_append_sheet(wb,ws,sheetName("Sin asignar",used));
+  const data=XLSX.write(wb,{bookType:"xlsx",type:"array"});
+  const d=new Date(),fn=`preplanificacion_${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}.xlsx`;
+  const blob=new Blob([data],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+  if(!downloads){ // fuera de Claude (sitio propio): descarga común del navegador
+    if(window.claude){toast("La descarga no está disponible en esta vista.");return}
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=fn;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000);toast("Excel listo: "+fn);return}
+  try{await downloads.save({filename:fn,data:new Blob([data],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})});toast("Excel listo: "+fn)}
+  catch(e){toast("No se descargó el archivo.")}
+}
+$("#exportBtn").onclick=exportar;
+
+// ---------- arranque ----------
+try{const c=localStorage.getItem(LS+"-cli");if(c)CLI=JSON.parse(c)}catch(e){}
+try{const raw=localStorage.getItem(LS);if(raw){const o=JSON.parse(raw);if(o&&Array.isArray(o.remitos))S=Object.assign(S,o)}}catch(e){}
+S.dia=proxHabil();
+render();setSaved("");
+(async()=>{
+  try{downloads=window.claude?await window.claude.use("downloads"):null}catch(e){}
+  try{db=window.claude?await window.claude.use("db"):null}catch(e){db=null}
+  // dentro del sitio "Facturación y despacho": la página contenedora ofrece el guardado en Firebase
+  if(!db&&!window.claude){try{db=(window.parent!==window&&window.parent.rowaPreplanStore)||null}catch(e){db=null}}
+  if(!db){setSaved("Guardado en este navegador");return}
+  db.doc("pre/remitos").onSnapshot(s=>{if(s.exists){const d=cp(s.data());S.remitos=d.lista||[];S.cargado=d.cargado||null;lsSave();render()}},e=>{console.error(e);setSaved("Sin conexión con la nube: se guarda en este navegador")});
+  db.doc("pre/plan").onSnapshot(s=>{if(dirtyPlan||saving)return;if(s.exists){const d=cp(s.data());if(ultimoLocal&&(!d.actualizado||d.actualizado<ultimoLocal))return;S.fletes=d.fletes||[];S.asig=d.asig||{};S.nuevos=d.nuevos||{};S.base=d.base||BASE0;S.dia=proxHabil();S.clientesInfo=d.clientesInfo||null;lsSave();render();setSaved("Guardado")}},()=>{});
+})();
+})();
+</script>
+
+</body>
+</html>

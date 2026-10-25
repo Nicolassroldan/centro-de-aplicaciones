@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, onSnapshot, doc, writeBatch, query } from 'firebase/firestore';
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
+import PreplanificacionApp from './PreplanificacionApp.jsx';
 
 // --- CONFIGURACIÓN DE FIREBASE ---
 const firebaseConfig = {
@@ -381,6 +382,7 @@ function App() {
         switch (currentView) {
             case 'picking': return <PickingApp onNavigate={setCurrentView} isXlsxReady={isXlsxReady} />;
             case 'logistics': return <LogisticsApp onNavigate={setCurrentView} isXlsxReady={isXlsxReady} />;
+            case 'preplan': return <PreplanificacionApp onNavigate={setCurrentView} />;
             default: return <Hub onNavigate={setCurrentView} />;
         }
     };
@@ -397,6 +399,7 @@ function Hub({ onNavigate }) {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-4xl">
                 <AppCard title="Asistente de Picking" description="Resumen de carga por chofer desde QM." onClick={() => onNavigate('picking')} icon="📦" />
                 <AppCard title="Consolidado de Deuda" description="Análisis de pedidos y producción requerida." onClick={() => onNavigate('logistics')} icon="📊" />
+                <AppCard title="Preplanificación de Fletes" description="Armado del reparto del día siguiente por zona, con mapa y recorrido desde Rowa Escobar." onClick={() => onNavigate('preplan')} icon="🚚" />
             </div>
         </div>
     );
