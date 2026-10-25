@@ -375,7 +375,7 @@ async function onFiles(files){
   if(det&&S.remitos.length){const m=cruzarDetalle(S.remitos,det);S.cargado=S.cargado||{fecha:new Date().toISOString(),archivo:""};S.cargado.detalle=true;
     ui.notice=(ui.notice?ui.notice+" ":"")+`Productos cruzados: ${m.n} de ${m.total} remitos.`;}
   else if(det)toast("Cargá primero (o junto) el archivo SIN detalle: es el que trae cliente y domicilio.");
-  if(CLI&&S.remitos.length){const n=geoRemitos(S.remitos);ui.notice=(cliMsg?cliMsg+" ":"")+(ui.notice?ui.notice+" ":"")+`Ubicados en el mapa: ${n} de ${S.remitos.length} remitos.`}
+  if(CLI&&S.remitos.length){const n=geoRemitos(S.remitos);ui.notice=(cliMsg?cliMsg+" ":"")+(ui.notice?ui.notice+" ":"")+`Ubicados en el mapa: ${n} de ${S.remitos.length} remitos.`+(n<S.remitos.length?` Los ${S.remitos.length-n} restantes no están en el listado de clientes guardado (pueden ser clientes nuevos): si querés ubicarlos, cargá un CSV de clientes actualizado.`:"")}
   else if(S.remitos.length)ui.notice=(ui.notice||"")+" Para ver el mapa y el orden de recorrido, cargá también el CSV de clientes de QuadMinds.";
   ui.sel.clear();
   await saveRemitos();markDirty();render();
