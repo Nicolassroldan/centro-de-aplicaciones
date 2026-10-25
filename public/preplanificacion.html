@@ -231,10 +231,14 @@ function scrollArriba(){if(EMB){try{window.parent.rowaPreplanScrollTop&&window.p
 // ---------- estado ----------
 const BASE0={nombre:"Rowa Escobar",lat:-34.3555,lng:-58.7650};
 let S={remitos:[],cargado:null,fletes:[],asig:{},nuevos:{},base:BASE0,clientesInfo:null,dia:null,problemas:{}};
-const MOTIVOS=["Sin stock","Falta factura o documentación","Cliente no recibe / cerrado","Dirección o datos incorrectos","Bloqueado por cobranzas","Otro"];
+const MOTIVOS=["Cerrado / fuera de horario","No estaba el responsable / no tenían preparado","No había nada para retirar","Sin efectivo para abonar","Sin factura / remito","Sin stock","Dirección o datos incorrectos","Otro"];
 const prob=r=>!!(S.problemas&&S.problemas[r.c]);
+// horario: "08:00 - 12:00 / 14:00 - 16:30". Solo de mañana = todas las ventanas terminan 13:30 o antes
+function finHorario(h){if(!h)return null;const m=[...h.matchAll(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/g)];if(!m.length)return null;return Math.max(...m.map(x=>+x[3]*60+ +x[4]))}
+const soloManana=h=>{const f=finHorario(h);return f!==null&&f<=13*60+30};
+const esRetiro=r=>/ORRET/i.test(r.c);
 let CLI=null; // maestro de clientes: [[domNorm,nombreNorm,numero,lat,lng]]
-let ui={tab:"libres",probForm:null,verOtras:false,sug:false,sugG:null,sugC:null,capG:1000,capC:500,sugModo:"libres",undo:null,q:"",zona:"",orden:"zona",mapa:true,soloNuevos:false,sel:new Set(),open:new Set(),confirmDel:null,confirmReset:false,notice:null};
+let ui={tab:"libres",probForm:null,verOtras:false,sug:false,sugG:null,sugC:null,capG:1100,capC:500,maxP:24,sugModo:"libres",undo:null,q:"",zona:"",orden:"zona",mapa:true,soloNuevos:false,sel:new Set(),open:new Set(),confirmDel:null,confirmReset:false,notice:null};
 let db=null, downloads=null, dirtyPlan=false, saving=false, pendingSave=false;
 const LS="preplan-fletes-v1";
 const FC=["--f1","--f2","--f3","--f4","--f5","--f6","--f7","--f8"];
@@ -266,6 +270,11 @@ const DIAS=["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"
 const AGENDA={1:["OESTE 1","OESTE 2","OESTE 3"],2:["SUR","SUR-OESTE","CAPITAL 3"],3:["NORTE 1","NORTE 2","CAPITAL 1","CAPITAL 2"],4:["OESTE 1","OESTE 2","SUR-OESTE"],5:["NORTE 1","NORTE 2","CAPITAL 1","CAPITAL 2","CAPITAL 3"]};
 const SIEMPRE=["TRANSPORTE 1","TRANSPORTE 2"];
 const zk=z=>String(z||"").toUpperCase().replace(/^ZONA\s+/,"").replace(/\s+/g," ").replace(/SUR\s*-?\s*OESTE/,"SUR-OESTE").trim();
+const familia=z=>{const k=zk(z);const m=k.match(/^(NORTE|OESTE|CAPITAL|TRANSPORTE)/);return m?m[1]:k};
+// zonas que pueden ir juntas en un flete: todas de la misma familia (Norte, Oeste, Capital...),
+// más Transporte 1/2, que se puede sumar a cualquier zona
+function zonasCompatibles(zs){const f=new Set(zs.map(familia));f.delete("TRANSPORTE");return f.size<=1}
+const soloTransporte=zs=>zs.every(z=>familia(z)==="TRANSPORTE");
 const zTit=z=>{const k=zk(z);return k.charAt(0)+k.slice(1).toLowerCase()};
 function proxHabilFecha(){const d=new Date();do{d.setDate(d.getDate()+1)}while(d.getDay()===0||d.getDay()===6);return d}
 function proxHabil(){return proxHabilFecha().getDay()}
@@ -318,13 +327,14 @@ function parseCSV(text){
 function parseClientes(buf){
   const text=new TextDecoder("windows-1252").decode(buf);const rows=parseCSV(text);
   const h=rows[0]||[];const ix=n=>h.findIndex(x=>norm(x)===n);
-  const ic=ix("codigo"),ir=ix("razonsocial"),id=ix("domicilio"),ila=ix("latitud"),ilo=ix("longitud");
+  const ic=ix("codigo"),ir=ix("razonsocial"),id=ix("domicilio"),ila=ix("latitud"),ilo=ix("longitud"),ih1=ix("horariodevisita"),ih2=ix("horariodevisita2");
   if(ic<0||id<0||ila<0||ilo<0)return null;
   const out=[];let sin=0;
   for(const r of rows.slice(1)){if(!r[ic])continue;
     const la=parseFloat(String(r[ila]).replace(",",".")),lo=parseFloat(String(r[ilo]).replace(",","."));
     if(!la||!lo||Math.abs(la)>60||Math.abs(lo)>80){sin++;continue}
-    out.push([norm(r[id]),norm(r[ir]),String(r[ic]).split("/")[0].trim(),Math.round(la*1e5)/1e5,Math.round(lo*1e5)/1e5])}
+    const hs=[ih1,ih2].map(i=>i>=0?String(r[i]||"").trim():"").filter(h=>/\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}/.test(h)&&!/^0?0:00\s*-\s*24:00$/.test(h));
+    out.push([norm(r[id]),norm(r[ir]),String(r[ic]).split("/")[0].trim(),Math.round(la*1e5)/1e5,Math.round(lo*1e5)/1e5,hs.join(" / ")])}
   return {lista:out,sin};
 }
 function geoRemitos(list){
@@ -337,7 +347,7 @@ function geoRemitos(list){
     if(m)hit=m.find(c=>c[1]===nr)||m[0];
     if(!hit){m=byN.get(nr);if(m&&m.length===1)hit=m[0];else if(m){hit=m.find(c=>nd.startsWith(c[0].slice(0,12)))||null}}
     if(!hit&&r.t==="Cliente"){m=byNum.get(codeParts(r.c)[1]);if(m&&m.length===1)hit=m[0]}
-    if(hit){r.ll=[hit[3],hit[4]];n++}else delete r.ll;
+    if(hit){r.ll=[hit[3],hit[4]];if(hit.length>5)r.h=hit[5]||"";n++}else{delete r.ll;delete r.h}
   }
   return n;
 }
@@ -485,7 +495,7 @@ function paradaHTML(g,opts){
     <span class="who">${who}</span>
     <span class="kg">${fmtKg(g.kg)} kg${opts.fl?` <button class="x" title="Devolver a sin asignar" data-act="unassign" data-codes="${ids}">×</button>`:""}</span>
     <span class="where">${esc(g.loc)} · ${esc(g.d.split(",")[0])}</span>
-    <span class="tags">${g.ll?`<span class="tag" title="Distancia aproximada desde ${esc(S.base.nombre)}">≈${Math.round(g.km)} km</span>`:(S.clientesInfo||CLI?`<span class="tag nogeo" title="No se encontró en el listado de clientes">sin ubicación</span>`:"")}${g.rs.length>1?`<span class="tag multi">${g.rs.length} remitos</span>`:`<span class="tag">1 remito</span>`}${opts.fl||opts.showZ?`<span class="tag">${esc(g.z.replace(/^ZONA /,""))}</span>`:""}${age}${g.nuevo?'<span class="tag new">nuevo</span>':""}<button class="link" data-act="toggle" data-k="${esc(g.k+(opts.fl||""))}">${isOpen?"ocultar":"ver remitos"}</button><button class="link warnlink" data-act="probopen" data-k="${esc("p:"+g.k+(opts.fl||""))}" title="Marcar con problema: sale de las propuestas hasta que se resuelva">⚠ problema</button></span>
+    <span class="tags">${g.ll?`<span class="tag" title="Distancia aproximada desde ${esc(S.base.nombre)}">≈${Math.round(g.km)} km</span>`:(S.clientesInfo||CLI?`<span class="tag nogeo" title="No se encontró en el listado de clientes">sin ubicación</span>`:"")}${g.rs.length>1?`<span class="tag multi">${g.rs.length} remitos</span>`:`<span class="tag">1 remito</span>`}${opts.fl||opts.showZ?`<span class="tag">${esc(g.z.replace(/^ZONA /,""))}</span>`:""}${(()=>{const h=(g.rs.find(r=>r.h)||{}).h;return h?`<span class="tag ${soloManana(h)?"old":""}" title="Horario de recepción del cliente (QuadMinds)">🕘 ${esc(h)}</span>`:""})()}${g.rs.some(esRetiro)?'<span class="tag" title="Retiro">retiro</span>':""}${age}${g.nuevo?'<span class="tag new">nuevo</span>':""}<button class="link" data-act="toggle" data-k="${esc(g.k+(opts.fl||""))}">${isOpen?"ocultar":"ver remitos"}</button><button class="link warnlink" data-act="probopen" data-k="${esc("p:"+g.k+(opts.fl||""))}" title="Marcar con problema: sale de las propuestas hasta que se resuelva">⚠ problema</button></span>
     ${ui.probForm&&ui.probForm.k==="p:"+g.k+(opts.fl||"")?probFormHTML(g.codes):""}
     ${exp}</div>`;
 }
@@ -503,6 +513,7 @@ function problemasHTML(list){
 function fleteOptions(sel){return `<option value="">Mover a…</option>`+S.fletes.map(f=>`<option value="${f.id}">${esc(f.nombre)}</option>`).join("")}
 
 // ---------- sugerir armado ----------
+let MAXP=24; // máximo de paradas por flete (en septiembre el máximo fue 24)
 function kmRuta(list){return list.length?ruta(list).km:0}
 // recorridos de una zona con el método de ahorros (Clarke-Wright), sin pasar la capacidad
 function rutasAhorro(paradas,lim){
@@ -511,7 +522,7 @@ function rutasAhorro(paradas,lim){
   for(let i=0;i<con.length;i++)for(let j=i+1;j<con.length;j++){const a=con[i],b=con[j];pares.push([hav(B,a.ll)+hav(B,b.ll)-hav(a.ll,b.ll),i,j])}
   pares.sort((x,y)=>y[0]-x[0]);
   const rutas=con.map((g,i)=>({ids:[i],kg:g.kg})),de=con.map((g,i)=>rutas[i]);
-  for(const [sv,i,j] of pares){const A=de[i],Bq=de[j];if(A===Bq||A.kg+Bq.kg>lim)continue;
+  for(const [sv,i,j] of pares){const A=de[i],Bq=de[j];if(A===Bq||A.kg+Bq.kg>lim||A.ids.length+Bq.ids.length>MAXP)continue;
     const aIni=A.ids[0]===i,aFin=A.ids[A.ids.length-1]===i,bIni=Bq.ids[0]===j,bFin=Bq.ids[Bq.ids.length-1]===j;let ids=null;
     if(aFin&&bIni)ids=A.ids.concat(Bq.ids);else if(bFin&&aIni)ids=Bq.ids.concat(A.ids);else if(aFin&&bFin)ids=A.ids.concat(Bq.ids.slice().reverse());else if(aIni&&bIni)ids=A.ids.slice().reverse().concat(Bq.ids);
     if(!ids)continue;const N={ids,kg:A.kg+Bq.kg};A.dead=Bq.dead=true;rutas.push(N);for(const x of ids)de[x]=N}
@@ -525,7 +536,7 @@ function rutasZona(paradas,lim){
   const cands=[rutasAhorro(paradas,lim)];
   if(lim!==Infinity){
     // alternativa: llenar fletes por peso (primero lo más pesado) y después ordenar por cercanía
-    const bins=[];for(const g of paradas.slice().sort((a,b)=>b.kg-a.kg)){const b=bins.filter(b=>b.kg+g.kg<=lim).sort((a,b)=>a.gs.length&&g.ll&&b.gs[0].ll?hav(a.gs[0].ll||g.ll,g.ll)-hav(b.gs[0].ll||g.ll,g.ll):0)[0];if(b){b.gs.push(g);b.kg+=g.kg}else bins.push({gs:[g],kg:g.kg})}
+    const bins=[];for(const g of paradas.slice().sort((a,b)=>b.kg-a.kg)){const b=bins.filter(b=>b.kg+g.kg<=lim&&b.gs.length<MAXP).sort((a,b)=>a.gs.length&&g.ll&&b.gs[0].ll?hav(a.gs[0].ll||g.ll,g.ll)-hav(b.gs[0].ll||g.ll,g.ll):0)[0];if(b){b.gs.push(g);b.kg+=g.kg}else bins.push({gs:[g],kg:g.kg})}
     cands.push(bins);
   }
   for(const c of cands)mejorarZona(c,lim);
@@ -540,13 +551,32 @@ function mejorarZona(rs,lim){
     for(const a of rs)for(const g of a.gs.slice()){if(!g.ll)continue;
       const kaA=kmRuta(a.gs),kaS=kmRuta(a.gs.filter(x=>x!==g));
       for(const b of rs){if(b===a)continue;
-        if(b.kg+g.kg<=lim){const d=(kaA-kaS)-(kmRuta(b.gs.concat([g]))-kmRuta(b.gs));if(d>0.5){a.gs.splice(a.gs.indexOf(g),1);a.kg-=g.kg;b.gs.push(g);b.kg+=g.kg;mov=true;break}}
+        if(b.kg+g.kg<=lim&&b.gs.length<MAXP){const d=(kaA-kaS)-(kmRuta(b.gs.concat([g]))-kmRuta(b.gs));if(d>0.5){a.gs.splice(a.gs.indexOf(g),1);a.kg-=g.kg;b.gs.push(g);b.kg+=g.kg;mov=true;break}}
         else{for(const h of b.gs){if(!h.ll)continue;if(a.kg-g.kg+h.kg>lim||b.kg-h.kg+g.kg>lim)continue;
           const nA=a.gs.filter(x=>x!==g).concat([h]),nB=b.gs.filter(x=>x!==h).concat([g]);
           const d=kaA+kmRuta(b.gs)-kmRuta(nA)-kmRuta(nB);if(d>0.5){a.gs=nA;b.gs=nB;a.kg+=h.kg-g.kg;b.kg+=g.kg-h.kg;mov=true;break}}if(mov)break}}
       if(mov)break}
     if(!mov)break}
   for(let i=rs.length-1;i>=0;i--)if(!rs[i].gs.length)rs.splice(i,1);
+}
+// une recorridos de zonas afines mientras entren en el flete y ahorren km (una vuelta menos)
+function unirAfines(rutas,lim){
+  let mejoro=true;
+  while(mejoro){mejoro=false;let best=null,bs=0;
+    for(let i=0;i<rutas.length;i++)for(let j=i+1;j<rutas.length;j++){const a=rutas[i],b=rutas[j];
+      if(a.kg+b.kg>lim||a.gs.length+b.gs.length>MAXP)continue;const zs=[...new Set(a.zonas.concat(b.zonas))];if(!zonasCompatibles(zs))continue;
+      const ka=kmRuta(a.gs),kb=kmRuta(b.gs),kab=kmRuta(a.gs.concat(b.gs));const sv=ka+kb-kab;
+      // preferir juntar zonas de la misma familia antes que sumar Transporte a otra zona
+      const misma=new Set(zs.map(familia)).size===1?1:0;const score=sv+misma*1000;
+      if(sv>0&&score>bs){bs=score;best=[i,j,zs]}}
+    if(best){const [i,j,zs]=best;const a=rutas[i],b=rutas[j];const N={gs:a.gs.concat(b.gs),kg:a.kg+b.kg,zonas:zs.sort()};
+      rutas.splice(j,1);rutas.splice(i,1,N);mejoro=true}}
+  return rutas;
+}
+function rutasDelDia(porZona,lim){
+  let rutas=[];
+  for(const z of Object.keys(porZona)){if(!porZona[z].length)continue;for(const r of rutasZona(porZona[z],lim)){r.zonas=[z];rutas.push(r)}}
+  return unirAfines(rutas,lim);
 }
 function necesidadDia(capG){
   const libresR=S.remitos.filter(r=>!prob(r)&&(!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c])));
@@ -565,26 +595,25 @@ function sugerir(nG,capG,nC,capC,modo){
   const enFlete=f=>S.remitos.filter(r=>S.asig[r.c]===f.id);
   const kgF=f=>enFlete(f).reduce((a,r)=>a+r.kg,0);
   for(const z of Object.keys(porZona)){
-    const fl=S.fletes.filter(f=>fz(f)===z);if(!fl.length)continue;
+    const fl=S.fletes.filter(f=>(f.zonas||[fz(f)]).includes(z));if(!fl.length)continue;
     const resto=[];
     for(const g of porZona[z].sort((a,b)=>b.maxDias-a.maxDias)){
       let best=null,bd=1e12;
-      for(const f of fl){if(kgF(f)+g.kg>capOf(f))continue;const base=grupos(enFlete(f));const d=g.ll?kmRuta(base.concat([g]))-kmRuta(base):0;if(d<bd){bd=d;best=f}}
+      for(const f of fl){if(kgF(f)+g.kg>capOf(f)||grupos(enFlete(f)).length>=MAXP)continue;const base=grupos(enFlete(f));const d=g.ll?kmRuta(base.concat([g]))-kmRuta(base):0;if(d<bd){bd=d;best=f}}
       if(best)for(const c of g.codes)S.asig[c]=best.id;else resto.push(g)}
     porZona[z]=resto;
   }
   // 2) armar recorridos nuevos por zona
-  let rutas=[];
-  for(const z of Object.keys(porZona)){if(!porZona[z].length)continue;
-    for(const r of rutasZona(porZona[z],capG||Infinity)){r.zona=z;r.prio=Math.max(...r.gs.map(g=>g.maxDias));rutas.push(r)}}
+  const rutas=rutasDelDia(porZona,capG||Infinity);
+  for(const r of rutas){r.zona=r.zonas.join(" + ");r.prio=Math.max(...r.gs.map(g=>g.maxDias))}
   // camiones disponibles (descontando los fletes que ya están armados)
-  const delDiaF=S.fletes.filter(f=>enDia(fz(f)));
+  const delDiaF=S.fletes.filter(f=>(f.zonas||[fz(f)]).some(z=>enDia(z)));
   const usadosG=delDiaF.filter(f=>(f.cap||capG)>capC).length,usadosC=delDiaF.length-usadosG;
   const camiones=[];for(let i=0;i<Math.max(0,nG-usadosG);i++)camiones.push(capG||Infinity);for(let i=0;i<Math.max(0,nC-usadosC);i++)camiones.push(capC||Infinity);
   camiones.sort((a,b)=>a-b);
   // prioridad: recorridos con pedidos más viejos primero, después los más pesados
   // prioridad: primero las zonas del día y después Transporte; dentro de cada grupo, pedidos más viejos y más pesados
-  rutas.sort((a,b)=>(SIEMPRE.includes(a.zona)-SIEMPRE.includes(b.zona))||b.prio-a.prio||b.kg-a.kg);
+  rutas.sort((a,b)=>(soloTransporte(a.zonas)-soloTransporte(b.zonas))||b.prio-a.prio||b.kg-a.kg);
   const cuenta={};S.fletes.forEach(f=>{const z=fz(f);cuenta[z]=(cuenta[z]||0)+1});
   let sobran=0,n=0;
   // 1) elegir qué recorridos salen (los de pedidos más viejos primero) según los camiones que hay
@@ -596,28 +625,31 @@ function sugerir(nG,capG,nC,capC,modo){
   // 2) el camión chico va al recorrido más pesado que entre; el resto a los grandes
   const nChicos=camiones.length-grandes;const chicos=new Set(salen.filter(r=>r.kg<=capC).sort((a,b)=>b.kg-a.kg).slice(0,nChicos));
   for(const r of salen){const cap=chicos.has(r)?capC:capG;cuenta[r.zona]=(cuenta[r.zona]||0)+1;
-    const f={id:"f"+Date.now().toString(36)+Math.random().toString(36).slice(2,5),nombre:zTit(r.zona)+(cuenta[r.zona]>1?" ("+cuenta[r.zona]+")":""),cap:cap||0,zona:r.zona};
+    const f={id:"f"+Date.now().toString(36)+Math.random().toString(36).slice(2,5),nombre:r.zonas.map(zTit).join(" + ")+(cuenta[r.zona]>1?" ("+cuenta[r.zona]+")":""),cap:cap||0,zona:r.zona,zonas:r.zonas};
     S.fletes.push(f);for(const g of r.gs)for(const c of g.codes){S.asig[c]=f.id;n++}}
   // ordenar fletes por agenda: transporte al final
-  S.fletes.sort((a,b)=>(SIEMPRE.includes(fz(a))-SIEMPRE.includes(fz(b)))||fz(a).localeCompare(fz(b)));
+  S.fletes.sort((a,b)=>(soloTransporte(a.zonas||[fz(a)])-soloTransporte(b.zonas||[fz(b)]))||fz(a).localeCompare(fz(b)));
   let km=0;for(const f of S.fletes)km+=kmRuta(grupos(enFlete(f)));
   return {n,sobran,km,nF:S.fletes.length};
 }
 function sugHTML(){
+  MAXP=ui.maxP||24;
   const porZ=necesidadDia(ui.capG);const zs=zonasDia(S.dia);
   // simulación: cuántos recorridos salen por zona con la capacidad grande
   const delDiaR=S.remitos.filter(r=>enDia(r.z)&&!prob(r));const gz={};for(const g of grupos(delDiaR))(gz[zk(g.z)]=gz[zk(g.z)]||[]).push(g);
-  let nec=0,livianos=0;const filas=zs.map(z=>{const d=porZ[z]||{kg:0};const rr=gz[z]?rutasZona(gz[z],ui.capG||Infinity):[];nec+=rr.length;livianos+=rr.filter(r=>r.kg<=ui.capC).length;return `<span class="tag">${esc(zTit(z))}: <b class="num">${fmtKg(d.kg)} kg</b>${rr.length?` · ${rr.length} flete${rr.length>1?"s":""}`:""}</span>`}).join(" ");
+  const sim=rutasDelDia(gz,ui.capG||Infinity);const nec=sim.length,livianos=sim.filter(r=>r.kg<=ui.capC).length;
+  const filas=zs.map(z=>{const d=porZ[z]||{kg:0};return `<span class="tag">${esc(zTit(z))}: <b class="num">${fmtKg(d.kg)} kg</b></span>`}).join(" ")+`<p style="margin:6px 0 0">Armado estimado: <b>${nec} flete${nec!==1?"s":""}</b> — ${sim.map(r=>esc(r.zonas.map(zTit).join(" + "))+" ("+fmtKg(r.kg)+" kg)").join(", ")}</p>`;
   const nCdef=ui.sugC??Math.min(1,livianos),nGdef=ui.sugG??Math.max(0,nec-nCdef);
   return `<div class="sugbox"><h2>Sugerir armado para el ${esc(DIAS[S.dia])}</h2>
     <p>Zonas del día, kilos y fletes que necesita cada una (para ${fmtKg(delDiaR.reduce((a,r)=>a+r.kg,0))} kg en total):</p><div class="zchips">${filas}</div>
-    <div class="row"><label for="sugN">Fletes de ${ui.capG} kg <input type="number" id="sugN" min="0" max="20" value="${nGdef}"></label>
-    <label for="sugC">Fletes de ${ui.capC} kg <input type="number" id="sugC" min="0" max="6" value="${nCdef}"></label>
+    <div class="row"><label for="sugN">Fletes grandes (hasta ${ui.capG} kg) <input type="number" id="sugN" min="0" max="20" value="${nGdef}"></label>
+    <label for="sugC">Fletes chicos (hasta ${ui.capC} kg) <input type="number" id="sugC" min="0" max="6" value="${nCdef}"></label>
     <label for="capG">Capacidad grande (kg) <input type="number" id="capG" min="0" step="50" value="${ui.capG}"></label>
-    <label for="capC">Capacidad chico (kg) <input type="number" id="capC" min="0" step="50" value="${ui.capC}"></label></div>
+    <label for="capC">Capacidad chico (kg) <input type="number" id="capC" min="0" step="50" value="${ui.capC}"></label>
+    <label for="maxP">Máx. paradas por flete <input type="number" id="maxP" min="3" max="60" value="${ui.maxP}"></label></div>
     <div class="row"><label><input type="radio" name="sugModo" value="libres" ${ui.sugModo==="libres"?"checked":""}> Completar (respeta los fletes que ya armaste)</label>
     <label><input type="radio" name="sugModo" value="todo" ${ui.sugModo==="todo"?"checked":""}> Rehacer el día desde cero</label></div>
-    <p>Cada flete lleva una sola zona. Dentro de cada zona junta las paradas que conviene recorrer seguidas desde ${esc(S.base.nombre)} sin pasar la capacidad; el flete de ${ui.capC} kg se usa para el recorrido más liviano que entre. Si faltan fletes, primero salen las zonas del día y después Transporte 1 y 2; dentro de cada grupo, los recorridos con pedidos más viejos. Las zonas que no salen el ${esc(DIAS[S.dia])} no se tocan.</p>
+    <p>Arma un flete por zona y, si una zona no llena el flete, la junta con su par (Norte 1 y 2, Oeste 1, 2 y 3, Capital 1, 2 y 3, Transporte 1 y 2) o suma Transporte a la zona más conveniente. Dentro de cada flete junta las paradas que conviene recorrer seguidas desde ${esc(S.base.nombre)} sin pasar la capacidad; el flete de ${ui.capC} kg se usa para el recorrido más liviano que entre. Si faltan fletes, primero salen las zonas del día y después Transporte 1 y 2; dentro de cada grupo, los recorridos con pedidos más viejos. Las zonas que no salen el ${esc(DIAS[S.dia])} no se tocan.</p>
     <div class="row"><button class="btn primary" data-act="sugok">Armar propuesta</button><button class="btn" data-act="sugno">Cancelar</button></div></div>`;
 }
 const REFS=[["Escobar",-34.349,-58.795],["Campana",-34.164,-59.033],["Pilar",-34.458,-58.914],["Tigre",-34.426,-58.580],["San Isidro",-34.471,-58.528],["CABA",-34.604,-58.382],["San Martín",-34.575,-58.537],["Morón",-34.653,-58.620],["Moreno",-34.651,-58.789],["Luján",-34.570,-59.105],["San Justo",-34.683,-58.561],["Lomas de Zamora",-34.761,-58.406],["Quilmes",-34.720,-58.254],["Ezeiza",-34.853,-58.523],["La Plata",-34.921,-57.955],["Berazategui",-34.765,-58.212],["Gral. Rodríguez",-34.608,-58.952],["Zárate",-34.098,-59.029]];
@@ -710,14 +742,15 @@ function renderInner(){
   S.fletes.forEach((f,i)=>{
     const rs=R.filter(r=>S.asig[r.c]===f.id),gs=grupos(rs);
     const kg=rs.reduce((a,r)=>a+r.kg,0),pct=f.cap?Math.min(100,kg/f.cap*100):0,over=f.cap&&kg>f.cap;
-    const zs=[...new Set(rs.map(r=>zTit(r.z)))];const mezcla=zs.length>1,fuera=rs.some(r=>!enDia(r.z));
+    const zs=[...new Set(rs.map(r=>zTit(r.z)))];const mezcla=!zonasCompatibles([...new Set(rs.map(r=>zk(r.z)))]),fuera=rs.some(r=>!enDia(r.z));
+    const manana=gs.filter(g=>g.rs.some(r=>soloManana(r.h))).length;
     const rt=ruta(gs);const gso=rt.orden;
     html+=`<article class="flete" style="--fc:${fleteColor(i)}" data-drop="${f.id}">
       <div class="flete-h"><div class="row1"><input class="name" id="fn-${f.id}" data-fname="${f.id}" value="${esc(f.nombre)}" aria-label="Nombre del flete">
         ${ui.confirmDel===f.id?`<span class="confirm">¿Borrar? <button class="btn small danger" data-act="delok" data-f="${f.id}">Sí</button><button class="btn small" data-act="delno">No</button></span>`:`<button class="x" title="Borrar flete" data-act="del" data-f="${f.id}">×</button>`}</div>
         <div class="metrics" style="grid-template-columns:repeat(4,1fr)"><div><span class="k">Paradas</span><span class="v">${gs.length}</span></div><div><span class="k">Remitos</span><span class="v">${rs.length}</span></div><div><span class="k">Kg</span><span class="v" ${over?'style="color:var(--bad)"':""}>${fmtKg(kg)}</span></div><div><span class="k" title="Ida y vuelta desde la base, estimado">Km aprox.</span><span class="v">${rt.km?Math.round(rt.km):"—"}</span></div></div>
         <div class="cap"><label for="cap-${f.id}">Capacidad</label><input id="cap-${f.id}" data-fcap="${f.id}" inputmode="numeric" value="${f.cap||""}" placeholder="kg"><div class="bar ${over?"over":""}"><i style="width:${pct}%"></i></div></div>
-        ${zs.length?`<div class="zchips">${zs.map(z=>`<span class="tag">${esc(z)}</span>`).join("")}${mezcla?`<span class="tag veryold">mezcla zonas</span>`:""}${fuera?`<span class="tag old">tiene zonas que no salen el ${esc(DIAS[S.dia])}</span>`:""}</div>`:""}
+        ${zs.length?`<div class="zchips">${zs.map(z=>`<span class="tag">${esc(z)}</span>`).join("")}${mezcla?`<span class="tag veryold" title="Junta zonas que no son afines">mezcla zonas</span>`:""}${manana?`<span class="tag ${manana>=4?"veryold":"old"}" title="Paradas cuyo horario termina antes de las 13:30">${manana} solo de mañana</span>`:""}${fuera?`<span class="tag old">tiene zonas que no salen el ${esc(DIAS[S.dia])}</span>`:""}</div>`:""}
       </div><div class="flete-list">${gso.length?gso.map((g,n)=>paradaHTML(g,{fl:f.id,n:n+1})).join(""):`<div class="empty-drop">Arrastrá paradas acá o usá “Mover a…”</div>`}</div></article>`;
   });
   html+=`<button class="empty-drop btn" data-act="addflete" style="min-height:120px;align-self:start">+ Agregar flete</button>`;
@@ -730,7 +763,7 @@ function renderInner(){
 // ---------- acciones ----------
 function assign(codes,fid){for(const c of codes){if(fid)S.asig[c]=fid;else delete S.asig[c]}markDirty();render()}
 function codesOfKeys(keys){const R=S.remitos.filter(r=>!prob(r)&&(!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c])));return R.filter(r=>keys.has(paradaKey(r))).map(r=>r.c)}
-function addFlete(){const n=S.fletes.length+1;S.fletes.push({id:"f"+Date.now().toString(36),nombre:"Flete "+n,cap:1000});markDirty();render()}
+function addFlete(){const n=S.fletes.length+1;S.fletes.push({id:"f"+Date.now().toString(36),nombre:"Flete "+n,cap:1100});markDirty();render()}
 function toast(t){if(EMB){try{if(window.parent.rowaPreplanToast){window.parent.rowaPreplanToast(t);return}}catch(e){}}const el=$("#toast");el.textContent=t;el.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>el.hidden=true,4000)}
 
 document.addEventListener("click",e=>{
@@ -754,6 +787,7 @@ document.addEventListener("click",e=>{
     const nG=Math.min(20,Math.max(0,parseInt($("#sugN").value)||0)),nC=Math.min(6,Math.max(0,parseInt($("#sugC").value)||0));
     const capG=Math.max(0,parseFloat($("#capG").value)||0),capC=Math.max(0,parseFloat($("#capC").value)||0);
     if(nG+nC<1){toast("Indicá al menos un flete.");return}
+    ui.maxP=Math.max(3,parseInt($("#maxP").value)||24);MAXP=ui.maxP;
     const modo=document.querySelector("input[name=sugModo]:checked")?.value||"libres";
     ui.sugG=nG;ui.sugC=nC;ui.capG=capG;ui.capC=capC;ui.sugModo=modo;
     ui.undo=JSON.stringify({fletes:S.fletes,asig:S.asig});
@@ -813,11 +847,11 @@ async function exportar(){
   if(!S.remitos.length){toast("Primero cargá un archivo.");return}
   const wb=XLSX.utils.book_new(),used=new Set();
   const resumen=[["Flete","Paradas","Remitos","Kg","Km aprox. (ida y vuelta)","Capacidad (kg)","Zonas"]];
-  const filas=(rs,ordenRuta)=>{const out=[["Orden","Cliente","Domicilio","Localidad","Zona","Km desde base","Código de pedido","Fecha pedido","Kg","Productos","Listo"]];
-    (ordenRuta?ruta(grupos(rs)).orden:grupos(rs).sort((a,b)=>a.z.localeCompare(b.z)||a.loc.localeCompare(b.loc))).forEach((g,n)=>g.rs.forEach(r=>out.push([n+1,r.cl,r.d,g.loc,r.z,g.km!=null?Math.round(g.km):"",r.c,r.f.split("-").reverse().join("/"),Math.round(r.kg*100)/100,(r.it||[]).map(i=>i[1]+" x"+i[2]).join("; "),""])));return out};
+  const filas=(rs,ordenRuta)=>{const out=[["Orden","Cliente","Domicilio","Localidad","Zona","Horario","Km desde base","Código de pedido","Fecha pedido","Kg","Productos","Listo"]];
+    (ordenRuta?ruta(grupos(rs)).orden:grupos(rs).sort((a,b)=>a.z.localeCompare(b.z)||a.loc.localeCompare(b.loc))).forEach((g,n)=>g.rs.forEach(r=>out.push([n+1,r.cl,r.d,g.loc,r.z,r.h||"",g.km!=null?Math.round(g.km):"",r.c,r.f.split("-").reverse().join("/"),Math.round(r.kg*100)/100,(r.it||[]).map(i=>i[1]+" x"+i[2]).join("; "),""])));return out};
   for(const f of S.fletes){const rs=S.remitos.filter(r=>S.asig[r.c]===f.id);
     resumen.push([f.nombre,grupos(rs).length,rs.length,Math.round(rs.reduce((a,r)=>a+r.kg,0)*10)/10,Math.round(ruta(grupos(rs)).km)||"",f.cap||"",[...new Set(rs.map(r=>r.z))].join(", ")]);
-    const ws=XLSX.utils.aoa_to_sheet(filas(rs,true));ws["!cols"]=[{wch:6},{wch:30},{wch:45},{wch:16},{wch:16},{wch:8},{wch:22},{wch:11},{wch:8},{wch:40},{wch:6}];XLSX.utils.book_append_sheet(wb,ws,sheetName(f.nombre,used))}
+    const ws=XLSX.utils.aoa_to_sheet(filas(rs,true));ws["!cols"]=[{wch:6},{wch:30},{wch:45},{wch:16},{wch:16},{wch:22},{wch:8},{wch:22},{wch:11},{wch:8},{wch:40},{wch:6}];XLSX.utils.book_append_sheet(wb,ws,sheetName(f.nombre,used))}
   const lib=S.remitos.filter(r=>!prob(r)&&(!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c])));
   resumen.push(["Sin asignar",grupos(lib).length,lib.length,Math.round(lib.reduce((a,r)=>a+r.kg,0)*10)/10,"","",""]);
   const wr=XLSX.utils.aoa_to_sheet(resumen);wr["!cols"]=[{wch:22},{wch:8},{wch:8},{wch:10},{wch:12},{wch:14},{wch:60}];
