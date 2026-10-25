@@ -33,6 +33,9 @@ const rowaPreplanStore = {
 };
 if (typeof window !== 'undefined') window.rowaPreplanStore = rowaPreplanStore;
 
+// Se agrega un número distinto en cada carga para que el navegador no muestre una versión vieja guardada
+const PAGINA = '/preplanificacion.html?v=' + Date.now();
+
 export default function PreplanificacionApp({ onNavigate }) {
     const [height, setHeight] = useState(900);
     const [aviso, setAviso] = useState(null);
@@ -50,7 +53,7 @@ export default function PreplanificacionApp({ onNavigate }) {
         <AppContainerPreplan onNavigate={onNavigate}>
             <iframe
                 ref={frameRef}
-                src="/preplanificacion.html"
+                src={PAGINA}
                 title="Preplanificación de fletes"
                 scrolling="no"
                 style={{ height: height + 'px' }}
