@@ -576,7 +576,7 @@ function unirAfines(rutas,lim){
 function rutasDelDia(porZona,lim){
   let rutas=[];
   for(const z of Object.keys(porZona)){if(!porZona[z].length)continue;for(const r of rutasZona(porZona[z],lim)){r.zonas=[z];rutas.push(r)}}
-  return unirAfines(rutas,lim);
+  return rutas; // cada flete lleva una sola zona (no se juntan zonas)
 }
 function necesidadDia(capG){
   const libresR=S.remitos.filter(r=>!prob(r)&&(!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c])));
@@ -649,7 +649,7 @@ function sugHTML(){
     <label for="maxP">Máx. paradas por flete <input type="number" id="maxP" min="3" max="60" value="${ui.maxP}"></label></div>
     <div class="row"><label><input type="radio" name="sugModo" value="libres" ${ui.sugModo==="libres"?"checked":""}> Completar (respeta los fletes que ya armaste)</label>
     <label><input type="radio" name="sugModo" value="todo" ${ui.sugModo==="todo"?"checked":""}> Rehacer el día desde cero</label></div>
-    <p>Arma un flete por zona y, si una zona no llena el flete, la junta con su par (Norte 1 y 2, Oeste 1, 2 y 3, Capital 1, 2 y 3, Transporte 1 y 2) o suma Transporte a la zona más conveniente. Dentro de cada flete junta las paradas que conviene recorrer seguidas desde ${esc(S.base.nombre)} sin pasar la capacidad; el flete de ${ui.capC} kg se usa para el recorrido más liviano que entre. Si faltan fletes, primero salen las zonas del día y después Transporte 1 y 2; dentro de cada grupo, los recorridos con pedidos más viejos. Las zonas que no salen el ${esc(DIAS[S.dia])} no se tocan.</p>
+    <p>Cada flete lleva una sola zona. Dentro de cada zona junta las paradas que conviene recorrer seguidas desde ${esc(S.base.nombre)} sin pasar la capacidad; el flete de ${ui.capC} kg se usa para el recorrido más liviano que entre. Si faltan fletes, primero salen las zonas del día y después Transporte 1 y 2; dentro de cada grupo, los recorridos con pedidos más viejos. Las zonas que no salen el ${esc(DIAS[S.dia])} no se tocan.</p>
     <div class="row"><button class="btn primary" data-act="sugok">Armar propuesta</button><button class="btn" data-act="sugno">Cancelar</button></div></div>`;
 }
 const REFS=[["Escobar",-34.349,-58.795],["Campana",-34.164,-59.033],["Pilar",-34.458,-58.914],["Tigre",-34.426,-58.580],["San Isidro",-34.471,-58.528],["CABA",-34.604,-58.382],["San Martín",-34.575,-58.537],["Morón",-34.653,-58.620],["Moreno",-34.651,-58.789],["Luján",-34.570,-59.105],["San Justo",-34.683,-58.561],["Lomas de Zamora",-34.761,-58.406],["Quilmes",-34.720,-58.254],["Ezeiza",-34.853,-58.523],["La Plata",-34.921,-57.955],["Berazategui",-34.765,-58.212],["Gral. Rodríguez",-34.608,-58.952],["Zárate",-34.098,-59.029]];
@@ -742,7 +742,7 @@ function renderInner(){
   S.fletes.forEach((f,i)=>{
     const rs=R.filter(r=>S.asig[r.c]===f.id),gs=grupos(rs);
     const kg=rs.reduce((a,r)=>a+r.kg,0),pct=f.cap?Math.min(100,kg/f.cap*100):0,over=f.cap&&kg>f.cap;
-    const zs=[...new Set(rs.map(r=>zTit(r.z)))];const mezcla=!zonasCompatibles([...new Set(rs.map(r=>zk(r.z)))]),fuera=rs.some(r=>!enDia(r.z));
+    const zs=[...new Set(rs.map(r=>zTit(r.z)))];const mezcla=zs.length>1,fuera=rs.some(r=>!enDia(r.z));
     const manana=gs.filter(g=>g.rs.some(r=>soloManana(r.h))).length;
     const rt=ruta(gs);const gso=rt.orden;
     html+=`<article class="flete" style="--fc:${fleteColor(i)}" data-drop="${f.id}">
@@ -750,7 +750,7 @@ function renderInner(){
         ${ui.confirmDel===f.id?`<span class="confirm">¿Borrar? <button class="btn small danger" data-act="delok" data-f="${f.id}">Sí</button><button class="btn small" data-act="delno">No</button></span>`:`<button class="x" title="Borrar flete" data-act="del" data-f="${f.id}">×</button>`}</div>
         <div class="metrics" style="grid-template-columns:repeat(4,1fr)"><div><span class="k">Paradas</span><span class="v">${gs.length}</span></div><div><span class="k">Remitos</span><span class="v">${rs.length}</span></div><div><span class="k">Kg</span><span class="v" ${over?'style="color:var(--bad)"':""}>${fmtKg(kg)}</span></div><div><span class="k" title="Ida y vuelta desde la base, estimado">Km aprox.</span><span class="v">${rt.km?Math.round(rt.km):"—"}</span></div></div>
         <div class="cap"><label for="cap-${f.id}">Capacidad</label><input id="cap-${f.id}" data-fcap="${f.id}" inputmode="numeric" value="${f.cap||""}" placeholder="kg"><div class="bar ${over?"over":""}"><i style="width:${pct}%"></i></div></div>
-        ${zs.length?`<div class="zchips">${zs.map(z=>`<span class="tag">${esc(z)}</span>`).join("")}${mezcla?`<span class="tag veryold" title="Junta zonas que no son afines">mezcla zonas</span>`:""}${manana?`<span class="tag ${manana>=4?"veryold":"old"}" title="Paradas cuyo horario termina antes de las 13:30">${manana} solo de mañana</span>`:""}${fuera?`<span class="tag old">tiene zonas que no salen el ${esc(DIAS[S.dia])}</span>`:""}</div>`:""}
+        ${zs.length?`<div class="zchips">${zs.map(z=>`<span class="tag">${esc(z)}</span>`).join("")}${mezcla?`<span class="tag veryold" title="El flete lleva más de una zona">mezcla zonas</span>`:""}${manana?`<span class="tag ${manana>=4?"veryold":"old"}" title="Paradas cuyo horario termina antes de las 13:30">${manana} solo de mañana</span>`:""}${fuera?`<span class="tag old">tiene zonas que no salen el ${esc(DIAS[S.dia])}</span>`:""}</div>`:""}
       </div><div class="flete-list">${gso.length?gso.map((g,n)=>paradaHTML(g,{fl:f.id,n:n+1})).join(""):`<div class="empty-drop">Arrastrá paradas acá o usá “Mover a…”</div>`}</div></article>`;
   });
   html+=`<button class="empty-drop btn" data-act="addflete" style="min-height:120px;align-self:start">+ Agregar flete</button>`;
