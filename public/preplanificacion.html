@@ -233,7 +233,7 @@ function zonaFlete(f){if(f.zona)return f.zona;const rs=S.remitos.filter(r=>S.asi
 const VIAL=1.35; // factor calle vs. línea recta
 function hav(a,b){const R=6371,t=Math.PI/180,dl=(b[0]-a[0])*t,dg=(b[1]-a[1])*t;const x=Math.sin(dl/2)**2+Math.cos(a[0]*t)*Math.cos(b[0]*t)*Math.sin(dg/2)**2;return 2*R*Math.asin(Math.sqrt(x))}
 const kmV=(a,b)=>hav(a,b)*VIAL;
-const baseLL=()=>[S.base.lat,S.base.lng];
+const baseLL=()=>{if(!S.base||typeof S.base.lat!=="number")S.base=BASE0;return [S.base.lat,S.base.lng]};
 // orden de recorrido: vecino más cercano desde la base + mejora 2-opt (ida y vuelta a la base)
 function ruta(gs){
   const con=gs.filter(g=>g.ll),sin=gs.filter(g=>!g.ll);if(!con.length)return {orden:sin,km:0};
@@ -582,7 +582,8 @@ function mapaHTML(gl){
     <div style="overflow-x:auto">${svg}</div>
     <div class="mapnote">Las líneas muestran el orden sugerido saliendo de la base y volviendo. Los km son estimados (línea recta × ${VIAL}); el recorrido final lo optimiza QuadMinds.${lejos?` ${lejos} paradas quedan fuera del mapa por estar a más de 160 km.`:""}${S.clientesInfo?` Clientes: ${esc(S.clientesInfo.archivo)}.`:""}</div></div>`;
 }
-function render(){
+function render(){try{renderInner()}catch(e){console.error(e);toast("Algo falló al dibujar la pantalla: "+(e&&e.message||e))}}
+function renderInner(){
   const main=$("#main"),R=S.remitos;
   const scrollPool=$(".pool")?.scrollTop||0;
   $("#sub").textContent=S.cargado?`Archivo: ${S.cargado.archivo||"—"} · cargado ${new Date(S.cargado.fecha).toLocaleString("es-AR",{dateStyle:"short",timeStyle:"short"})}${S.cargado.detalle?" · con productos":""}`:"Remitos no planificados, ordenados por flete antes de pasar a QuadMinds";
@@ -684,7 +685,7 @@ document.addEventListener("click",e=>{
   else if(a==="delok"){const id=b.dataset.f;S.fletes=S.fletes.filter(f=>f.id!==id);for(const c in S.asig)if(S.asig[c]===id)delete S.asig[c];ui.confirmDel=null;markDirty();render()}
   else if(a==="reset"){ui.confirmReset=true;render()}
   else if(a==="resetno"){ui.confirmReset=false;render()}
-  else if(a==="resetok"){S={remitos:[],cargado:null,fletes:[],asig:{},nuevos:{}};ui.confirmReset=false;saveRemitos();markDirty();render()}
+  else if(a==="resetok"){S={remitos:[],cargado:null,fletes:[],asig:{},nuevos:{},base:S.base||BASE0,clientesInfo:S.clientesInfo,dia:proxHabil()};ui.confirmReset=false;ui.sel.clear();ui.undo=null;saveRemitos();markDirty();render()}
   else if(a==="closenotice"){ui.notice=null;ui.undo=null;render()}
 });
 document.addEventListener("change",e=>{
