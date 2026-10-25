@@ -210,7 +210,6 @@ html.rowa .toast{position:sticky}
       <input type="file" id="fileIn" accept=".xls,.xlsx,.csv" multiple hidden>
       <button class="btn" id="sugBtn">Sugerir armado</button>
       <button class="btn" id="mapBtn">Mapa</button>
-      <button class="btn" id="addFlete">+ Flete</button>
       <button class="btn" id="exportBtn">Exportar Excel</button>
       <span class="saved" id="saved"></span>
     </div>
@@ -790,7 +789,6 @@ document.addEventListener("change",e=>{
   else if(t.id==="fileIn"&&t.files.length){onFiles([...t.files]);t.value=""}
 });
 document.addEventListener("input",e=>{if(e.target.id==="q"){ui.q=e.target.value;clearTimeout(render.qt);render.qt=setTimeout(()=>{render();const q=$("#q");if(q){q.focus();q.setSelectionRange(q.value.length,q.value.length)}},200)}});
-$("#addFlete").onclick=addFlete;
 $("#sugBtn").onclick=()=>{ui.sug=!ui.sug;if(!S.remitos.length){toast("Primero cargá los remitos.");ui.sug=false}render();if(ui.sug){scrollArriba();$("#sugN")?.focus({preventScroll:true})}};
 $("#mapBtn").onclick=()=>{ui.mapa=!ui.mapa;render()};
 // drag & drop de paradas y de archivos
