@@ -77,7 +77,7 @@ function AppContainerPreplan({ onNavigate, children }) {
             </button>
             <header className="text-center mb-8">
                 <h1 className="text-4xl font-bold text-gray-900">Preplanificación de Fletes</h1>
-                <p className="text-gray-600 mt-2">Armado del reparto del día siguiente por zona, con mapa y recorrido desde Rowa Escobar.</p>
+                <p className="text-gray-600 mt-2">Armado del reparto del día siguiente por zona, con mapa y recorrido saliendo de Rowa Escobar.</p>
             </header>
             {children}
         </div>

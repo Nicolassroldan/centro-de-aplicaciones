@@ -301,16 +301,18 @@ const VIAL=1.35; // factor calle vs. línea recta
 function hav(a,b){const R=6371,t=Math.PI/180,dl=(b[0]-a[0])*t,dg=(b[1]-a[1])*t;const x=Math.sin(dl/2)**2+Math.cos(a[0]*t)*Math.cos(b[0]*t)*Math.sin(dg/2)**2;return 2*R*Math.asin(Math.sqrt(x))}
 const kmV=(a,b)=>hav(a,b)*VIAL;
 const baseLL=()=>{if(!S.base||typeof S.base.lat!=="number")S.base=BASE0;return [S.base.lat,S.base.lng]};
-// orden de recorrido: vecino más cercano desde la base + mejora 2-opt (ida y vuelta a la base)
+// orden de recorrido: vecino más cercano desde la base + mejora 2-opt.
+// Los fletes salen de la base y NO vuelven: se mide desde la base hasta la última parada.
 function ruta(gs){
   const con=gs.filter(g=>g.ll),sin=gs.filter(g=>!g.ll);if(!con.length)return {orden:sin,km:0};
   const B=baseLL(),left=con.slice(),ord=[];let cur=B;
   while(left.length){let bi=0,bd=1e9;left.forEach((g,i)=>{const d=hav(cur,g.ll);if(d<bd){bd=d;bi=i}});cur=left[bi].ll;ord.push(left.splice(bi,1)[0])}
-  const pts=[B,...ord.map(g=>g.ll),B];
-  let mejoro=true,it=0;
+  const pts=[B,...ord.map(g=>g.ll)]; // recorrido abierto: sin regreso a la base
+  const n=pts.length;let mejoro=true,it=0;
   while(mejoro&&it++<60){mejoro=false;
-    for(let i=1;i<pts.length-2;i++)for(let k=i+1;k<pts.length-1;k++){
-      const d=hav(pts[i-1],pts[i])+hav(pts[k],pts[k+1])-hav(pts[i-1],pts[k])-hav(pts[i],pts[k+1]);
+    for(let i=1;i<n-1;i++)for(let k=i+1;k<n;k++){
+      const fin=k+1<n;
+      const d=hav(pts[i-1],pts[i])+(fin?hav(pts[k],pts[k+1]):0)-hav(pts[i-1],pts[k])-(fin?hav(pts[i],pts[k+1]):0);
       if(d>1e-6){pts.splice(i,k-i+1,...pts.slice(i,k+1).reverse());ord.splice(i-1,k-i+1,...ord.slice(i-1,k).reverse());mejoro=true}}}
   let km=0;for(let i=1;i<pts.length;i++)km+=kmV(pts[i-1],pts[i]);
   return {orden:[...ord,...sin],km};
@@ -668,7 +670,7 @@ function mapaHTML(gl){
   for(const r of REFS){if(!inB([r[1],r[2]]))continue;const [x,y]=P([r[1],r[2]]);svg+=`<circle class="refdot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2"/><text class="ref" x="${(x+5).toFixed(1)}" y="${(y-4).toFixed(1)}">${esc(r[0])}</text>`}
   const fIdx=new Map(S.fletes.map((f,i)=>[f.id,i]));
   S.fletes.forEach((f,i)=>{const gs=grupos(S.remitos.filter(r=>S.asig[r.c]===f.id)).filter(g=>g.ll);if(!gs.length)return;
-    const o=ruta(gs).orden;const pts=[B,...o.map(g=>g.ll),B].map(P);
+    const o=ruta(gs).orden;const pts=[B,...o.filter(g=>g.ll).map(g=>g.ll)].map(P);
     svg+=`<polyline class="route" stroke="${fleteColor(i)}" points="${pts.map(p=>p[0].toFixed(1)+","+p[1].toFixed(1)).join(" ")}"/>`});
   const libres=new Set(gl.map(g=>g.k));
   const ptsHTML=[];
@@ -684,7 +686,7 @@ function mapaHTML(gl){
     <div class="legend"><span><i style="background:var(--panel);border:2px solid var(--muted)"></i>Sin asignar del día (tocá para seleccionar)</span>${S.fletes.map((f,i)=>`<span><i style="background:${fleteColor(i)}"></i>${esc(f.nombre)}</span>`).join("")}</div>
     <div class="basebox"><label for="baseIn">Base (lat, long):</label><input id="baseIn" value="${S.base.lat}, ${S.base.lng}"></div></div>
     <div style="overflow-x:auto">${svg}</div>
-    <div class="mapnote">Las líneas muestran el orden sugerido saliendo de la base y volviendo. Los km son estimados (línea recta × ${VIAL}); el recorrido final lo optimiza QuadMinds.${lejos?` ${lejos} paradas quedan fuera del mapa por estar a más de 160 km.`:""}${S.clientesInfo?` Clientes: ${esc(S.clientesInfo.archivo)}.`:""}</div></div>`;
+    <div class="mapnote">Las líneas muestran el orden sugerido saliendo de la base hasta la última parada (los fletes no vuelven a la base). Los km son estimados (línea recta × ${VIAL}); el recorrido final lo optimiza QuadMinds.${lejos?` ${lejos} paradas quedan fuera del mapa por estar a más de 160 km.`:""}${S.clientesInfo?` Clientes: ${esc(S.clientesInfo.archivo)}.`:""}</div></div>`;
 }
 function render(){try{renderInner()}catch(e){console.error(e);toast("Algo falló al dibujar la pantalla: "+(e&&e.message||e))}}
 function renderInner(){
@@ -748,7 +750,7 @@ function renderInner(){
     html+=`<article class="flete" style="--fc:${fleteColor(i)}" data-drop="${f.id}">
       <div class="flete-h"><div class="row1"><input class="name" id="fn-${f.id}" data-fname="${f.id}" value="${esc(f.nombre)}" aria-label="Nombre del flete">
         ${ui.confirmDel===f.id?`<span class="confirm">¿Borrar? <button class="btn small danger" data-act="delok" data-f="${f.id}">Sí</button><button class="btn small" data-act="delno">No</button></span>`:`<button class="x" title="Borrar flete" data-act="del" data-f="${f.id}">×</button>`}</div>
-        <div class="metrics" style="grid-template-columns:repeat(4,1fr)"><div><span class="k">Paradas</span><span class="v">${gs.length}</span></div><div><span class="k">Remitos</span><span class="v">${rs.length}</span></div><div><span class="k">Kg</span><span class="v" ${over?'style="color:var(--bad)"':""}>${fmtKg(kg)}</span></div><div><span class="k" title="Ida y vuelta desde la base, estimado">Km aprox.</span><span class="v">${rt.km?Math.round(rt.km):"—"}</span></div></div>
+        <div class="metrics" style="grid-template-columns:repeat(4,1fr)"><div><span class="k">Paradas</span><span class="v">${gs.length}</span></div><div><span class="k">Remitos</span><span class="v">${rs.length}</span></div><div><span class="k">Kg</span><span class="v" ${over?'style="color:var(--bad)"':""}>${fmtKg(kg)}</span></div><div><span class="k" title="Desde la base hasta la última parada, estimado">Km aprox.</span><span class="v">${rt.km?Math.round(rt.km):"—"}</span></div></div>
         <div class="cap"><label for="cap-${f.id}">Capacidad</label><input id="cap-${f.id}" data-fcap="${f.id}" inputmode="numeric" value="${f.cap||""}" placeholder="kg"><div class="bar ${over?"over":""}"><i style="width:${pct}%"></i></div></div>
         ${zs.length?`<div class="zchips">${zs.map(z=>`<span class="tag">${esc(z)}</span>`).join("")}${mezcla?`<span class="tag veryold" title="El flete lleva más de una zona">mezcla zonas</span>`:""}${manana?`<span class="tag ${manana>=4?"veryold":"old"}" title="Paradas cuyo horario termina antes de las 13:30">${manana} solo de mañana</span>`:""}${fuera?`<span class="tag old">tiene zonas que no salen el ${esc(DIAS[S.dia])}</span>`:""}</div>`:""}
       </div><div class="flete-list">${gso.length?gso.map((g,n)=>paradaHTML(g,{fl:f.id,n:n+1})).join(""):`<div class="empty-drop">Arrastrá paradas acá o usá “Mover a…”</div>`}</div></article>`;
@@ -846,7 +848,7 @@ function sheetName(s,used){let n=String(s).replace(/[\[\]:*?\/\\]/g," ").slice(0
 async function exportar(){
   if(!S.remitos.length){toast("Primero cargá un archivo.");return}
   const wb=XLSX.utils.book_new(),used=new Set();
-  const resumen=[["Flete","Paradas","Remitos","Kg","Km aprox. (ida y vuelta)","Capacidad (kg)","Zonas"]];
+  const resumen=[["Flete","Paradas","Remitos","Kg","Km aprox. (base a última parada)","Capacidad (kg)","Zonas"]];
   const filas=(rs,ordenRuta)=>{const out=[["Orden","Cliente","Domicilio","Localidad","Zona","Horario","Km desde base","Código de pedido","Fecha pedido","Kg","Productos","Listo"]];
     (ordenRuta?ruta(grupos(rs)).orden:grupos(rs).sort((a,b)=>a.z.localeCompare(b.z)||a.loc.localeCompare(b.loc))).forEach((g,n)=>g.rs.forEach(r=>out.push([n+1,r.cl,r.d,g.loc,r.z,r.h||"",g.km!=null?Math.round(g.km):"",r.c,r.f.split("-").reverse().join("/"),Math.round(r.kg*100)/100,(r.it||[]).map(i=>i[1]+" x"+i[2]).join("; "),""])));return out};
   for(const f of S.fletes){const rs=S.remitos.filter(r=>S.asig[r.c]===f.id);
