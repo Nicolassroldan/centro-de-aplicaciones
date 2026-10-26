@@ -208,7 +208,7 @@ html.rowa .toast{position:sticky}
     <div class="actions">
       <label class="btn primary" for="fileIn">Cargar archivos</label>
       <input type="file" id="fileIn" accept=".xls,.xlsx,.csv" multiple hidden>
-      <button class="btn" id="sugBtn">Sugerir armado</button>
+      <button class="btn" id="sugBtn">Armar por zona</button>
       <button class="btn" id="mapBtn">Mapa</button>
       <button class="btn" id="exportBtn">Exportar Excel</button>
       <span class="saved" id="saved"></span>
@@ -586,6 +586,33 @@ function necesidadDia(capG){
   for(const r of libresR)if(enDia(r.z))porZ[zk(r.z)].libre+=r.kg;
   return porZ;
 }
+// Armado por zona: un grupo por cada zona del día con todas sus paradas, sin límite de kilos
+function sugerirPorZona(modo){
+  S.fletes=S.fletes.filter(f=>S.remitos.some(r=>S.asig[r.c]===f.id));
+  if(modo==="todo"){S.asig={};S.fletes=[]}
+  const libresR=S.remitos.filter(r=>!prob(r)&&(!S.asig[r.c]||!S.fletes.some(f=>f.id===S.asig[r.c]))&&enDia(r.z));
+  let n=0;
+  for(const z of zonasDia(S.dia)){
+    const rs=libresR.filter(r=>zk(r.z)===z);if(!rs.length)continue;
+    let f=S.fletes.find(f=>(f.zonas||[zonaFlete(f)]).includes(z));
+    if(!f){f={id:"f"+Date.now().toString(36)+Math.random().toString(36).slice(2,5),nombre:zTit(z),cap:0,zona:z,zonas:[z]};S.fletes.push(f)}
+    for(const r of rs){S.asig[r.c]=f.id;n++}
+  }
+  const orden=zonasDia(S.dia);const pos=f=>{const i=orden.indexOf((f.zonas||[zonaFlete(f)])[0]);return i<0?99:i};
+  S.fletes.sort((a,b)=>pos(a)-pos(b));
+  let km=0;for(const f of S.fletes)km+=kmRuta(grupos(S.remitos.filter(r=>S.asig[r.c]===f.id)));
+  return {n,km,nF:S.fletes.length};
+}
+function sugHTML(){
+  const delDiaR=S.remitos.filter(r=>enDia(r.z)&&!prob(r));
+  const filas=zonasDia(S.dia).map(z=>{const rs=delDiaR.filter(r=>zk(r.z)===z);const kg=rs.reduce((a,r)=>a+r.kg,0);return `<span class="tag">${esc(zTit(z))}: <b class="num">${fmtKg(kg)} kg</b> · ${grupos(rs).length} parada${grupos(rs).length===1?"":"s"}</span>`}).join(" ");
+  return `<div class="sugbox"><h2>Armar por zona para el ${esc(DIAS[S.dia])}</h2>
+    <p>Arma un grupo por cada zona del día con todas sus paradas, sin límite de kilos (${fmtKg(delDiaR.reduce((a,r)=>a+r.kg,0))} kg en total). Dentro de cada zona las paradas quedan en orden de recorrido saliendo de ${esc(S.base.nombre)}. Los remitos con problemas no se incluyen.</p>
+    <div class="zchips">${filas}</div>
+    <div class="row"><label><input type="radio" name="sugModo" value="libres" ${ui.sugModo==="libres"?"checked":""}> Completar (respeta lo que ya armaste)</label>
+    <label><input type="radio" name="sugModo" value="todo" ${ui.sugModo==="todo"?"checked":""}> Rehacer el día desde cero</label></div>
+    <div class="row"><button class="btn primary" data-act="sugok">Armar por zona</button><button class="btn" data-act="sugno">Cancelar</button></div></div>`;
+}
 function sugerir(nG,capG,nC,capC,modo){
   S.fletes=S.fletes.filter(f=>S.remitos.some(r=>S.asig[r.c]===f.id)); // los fletes vacíos no ocupan camión
   if(modo==="todo"){S.asig={};S.fletes=[]}
@@ -634,7 +661,7 @@ function sugerir(nG,capG,nC,capC,modo){
   let km=0;for(const f of S.fletes)km+=kmRuta(grupos(enFlete(f)));
   return {n,sobran,km,nF:S.fletes.length};
 }
-function sugHTML(){
+function sugHTMLPorFletes(){ // armado por camiones (sin uso: ahora se arma por zona)
   MAXP=ui.maxP||24;
   const porZ=necesidadDia(ui.capG);const zs=zonasDia(S.dia);
   // simulación: cuántos recorridos salen por zona con la capacidad grande
@@ -784,17 +811,11 @@ document.addEventListener("click",e=>{
   if(a==="otras"){ui.verOtras=!ui.verOtras;render();return}
   if(a==="sugno"){ui.sug=false;render();return}
   if(a==="sugok"){try{
-    if(!S.remitos.some(r=>r.ll)){toast("Para sugerir el armado hace falta el CSV de clientes con las ubicaciones.");return}
-    if(!S.remitos.some(r=>enDia(r.z))){toast("No hay remitos de las zonas del "+DIAS[S.dia]+".");return}
-    const nG=Math.min(20,Math.max(0,parseInt($("#sugN").value)||0)),nC=Math.min(6,Math.max(0,parseInt($("#sugC").value)||0));
-    const capG=Math.max(0,parseFloat($("#capG").value)||0),capC=Math.max(0,parseFloat($("#capC").value)||0);
-    if(nG+nC<1){toast("Indicá al menos un flete.");return}
-    ui.maxP=Math.max(3,parseInt($("#maxP").value)||24);MAXP=ui.maxP;
-    const modo=document.querySelector("input[name=sugModo]:checked")?.value||"libres";
-    ui.sugG=nG;ui.sugC=nC;ui.capG=capG;ui.capC=capC;ui.sugModo=modo;
+    if(!S.remitos.some(r=>enDia(r.z)&&!prob(r))){toast("No hay remitos de las zonas del "+DIAS[S.dia]+".");return}
+    const modo=document.querySelector("input[name=sugModo]:checked")?.value||"libres";ui.sugModo=modo;
     ui.undo=JSON.stringify({fletes:S.fletes,asig:S.asig});
-    const r=sugerir(nG,capG,nC,capC,modo);ui.sug=false;
-    ui.notice=`Propuesta para el ${DIAS[S.dia]}: ${r.nF} fletes, ${r.n} remitos repartidos, ≈${Math.round(r.km)} km en total.${r.sobran?` ${r.sobran} paradas no entraron en los fletes disponibles y quedaron sin asignar.`:""}`;
+    const r=sugerirPorZona(modo);ui.sug=false;
+    ui.notice=`Armado por zona para el ${DIAS[S.dia]}: ${r.nF} zonas, ${r.n} remitos asignados.`;
     markDirty();render();scrollArriba()}catch(err){console.error(err);toast("No se pudo armar la propuesta: "+(err&&err.message||err))}return}
   if(a==="undo"){if(ui.undo){const u=JSON.parse(ui.undo);S.fletes=u.fletes;S.asig=u.asig;ui.undo=null;ui.notice="Se deshizo la propuesta.";markDirty();render()}return}
   if(a==="toggle"){const k=b.dataset.k;ui.open.has(k)?ui.open.delete(k):ui.open.add(k);render()}
