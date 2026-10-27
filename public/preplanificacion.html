@@ -193,6 +193,8 @@ html.rowa .mapsvg{max-height:520px}
 html.rowa .parada{background:#fff}
 html.rowa .parada:hover{background:#f9fafb}
 html.rowa .toast{position:sticky}
+.mapsvg .inicio{fill:var(--accent);stroke:var(--panel);stroke-width:1.5}
+.mapsvg.picking{cursor:crosshair}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--panel);padding:9px 14px;border-radius:var(--r);font-size:13px;z-index:20;max-width:calc(100% - 32px)}
 .saved{font-size:12px;color:var(--muted)}
 .confirm{display:flex;gap:6px;align-items:center;font-size:12px;flex-wrap:wrap}
@@ -233,12 +235,15 @@ const BASE0={nombre:"Rowa Escobar",lat:-34.3555,lng:-58.7650};
 let S={remitos:[],cargado:null,fletes:[],asig:{},nuevos:{},base:BASE0,clientesInfo:null,dia:null,problemas:{}};
 const MOTIVOS=["Cerrado / fuera de horario","No estaba el responsable / no tenían preparado","No había nada para retirar","Sin efectivo para abonar","Sin factura / remito","Sin stock","Dirección o datos incorrectos","Otro"];
 const prob=r=>!!(S.problemas&&S.problemas[r.c]);
+// punto de inicio de cada zona (dónde empieza el recorrido). Sin dato: la base (Rowa Escobar)
+const INICIOS0={"TRANSPORTE 2":[-34.6295,-58.3745]}; // Enlace Au. Arturo Frondizi (aprox.)
+function inicioZona(z){const k=zk(z);return (S.inicios&&S.inicios[k])||null}
 // horario: "08:00 - 12:00 / 14:00 - 16:30". Solo de mañana = todas las ventanas terminan 13:30 o antes
 function finHorario(h){if(!h)return null;const m=[...h.matchAll(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/g)];if(!m.length)return null;return Math.max(...m.map(x=>+x[3]*60+ +x[4]))}
 const soloManana=h=>{const f=finHorario(h);return f!==null&&f<=13*60+30};
 const esRetiro=r=>/ORRET/i.test(r.c);
 let CLI=null; // maestro de clientes: [[domNorm,nombreNorm,numero,lat,lng]]
-let ui={tab:"libres",probForm:null,verOtras:false,sug:false,sugG:null,sugC:null,capG:1100,capC:500,maxP:24,sugModo:"libres",undo:null,q:"",zona:"",orden:"zona",mapa:true,soloNuevos:false,sel:new Set(),open:new Set(),confirmDel:null,confirmReset:false,notice:null};
+let ui={mapZona:"",pick:null,tab:"libres",probForm:null,verOtras:false,sug:false,sugG:null,sugC:null,capG:1100,capC:500,maxP:24,sugModo:"libres",undo:null,q:"",zona:"",orden:"zona",mapa:true,soloNuevos:false,sel:new Set(),open:new Set(),confirmDel:null,confirmReset:false,notice:null};
 let db=null, downloads=null, dirtyPlan=false, saving=false, pendingSave=false;
 const LS="preplan-fletes-v1";
 const FC=["--f1","--f2","--f3","--f4","--f5","--f6","--f7","--f8"];
@@ -305,7 +310,7 @@ const baseLL=()=>{if(!S.base||typeof S.base.lat!=="number")S.base=BASE0;return [
 // Los fletes salen de la base y NO vuelven: se mide desde la base hasta la última parada.
 function ruta(gs){
   const con=gs.filter(g=>g.ll),sin=gs.filter(g=>!g.ll);if(!con.length)return {orden:sin,km:0};
-  const B=baseLL(),left=con.slice(),ord=[];let cur=B;
+  const B=(con.length&&inicioZona(con[0].z))||baseLL(),left=con.slice(),ord=[];let cur=B;
   while(left.length){let bi=0,bd=1e9;left.forEach((g,i)=>{const d=hav(cur,g.ll);if(d<bd){bd=d;bi=i}});cur=left[bi].ll;ord.push(left.splice(bi,1)[0])}
   const pts=[B,...ord.map(g=>g.ll)]; // recorrido abierto: sin regreso a la base
   const n=pts.length;let mejoro=true,it=0;
@@ -453,7 +458,7 @@ async function onFiles(files){
 }
 
 // ---------- persistencia ----------
-function snapshotPlan(){return {paraFecha:S.paraFecha,problemas:S.problemas||{},fletes:S.fletes,asig:S.asig,nuevos:S.nuevos,base:S.base,clientesInfo:S.clientesInfo,dia:S.dia,actualizado:ultimoLocal||new Date().toISOString()}}
+function snapshotPlan(){return {inicios:S.inicios||{},paraFecha:S.paraFecha,problemas:S.problemas||{},fletes:S.fletes,asig:S.asig,nuevos:S.nuevos,base:S.base,clientesInfo:S.clientesInfo,dia:S.dia,actualizado:ultimoLocal||new Date().toISOString()}}
 function lsSave(){try{localStorage.setItem(LS,JSON.stringify(S))}catch(e){}}
 let ultimoLocal="";
 function markDirty(){dirtyPlan=true;ultimoLocal=new Date().toISOString();lsSave();setSaved("Guardando…");clearTimeout(markDirty.t);markDirty.t=setTimeout(flushPlan,700)}
@@ -681,23 +686,31 @@ function sugHTMLPorFletes(){ // armado por camiones (sin uso: ahora se arma por 
     <p>Cada flete lleva una sola zona. Dentro de cada zona junta las paradas que conviene recorrer seguidas desde ${esc(S.base.nombre)} sin pasar la capacidad; el flete de ${ui.capC} kg se usa para el recorrido más liviano que entre. Si faltan fletes, primero salen las zonas del día y después Transporte 1 y 2; dentro de cada grupo, los recorridos con pedidos más viejos. Las zonas que no salen el ${esc(DIAS[S.dia])} no se tocan.</p>
     <div class="row"><button class="btn primary" data-act="sugok">Armar propuesta</button><button class="btn" data-act="sugno">Cancelar</button></div></div>`;
 }
+const REFS_CABA=[["Constitución",-34.6275,-58.3815],["Barracas",-34.6450,-58.3800],["La Boca",-34.6345,-58.3630],["Parque Patricios",-34.6375,-58.4005],["Nueva Pompeya",-34.6505,-58.4185],["San Telmo",-34.6210,-58.3730],["Puerto Madero",-34.6110,-58.3630],["Microcentro",-34.6037,-58.3816],["Balvanera",-34.6090,-58.4050],["Boedo",-34.6300,-58.4170],["Caballito",-34.6190,-58.4400],["Flores",-34.6280,-58.4630],["Parque Chacabuco",-34.6370,-58.4370],["Villa Soldati",-34.6640,-58.4430],["Villa Lugano",-34.6760,-58.4720],["Mataderos",-34.6600,-58.5030],["Liniers",-34.6430,-58.5200],["Villa Luro",-34.6380,-58.5020],["Floresta",-34.6280,-58.4840],["Villa Devoto",-34.6000,-58.5130],["Villa del Parque",-34.6050,-58.4900],["Paternal",-34.5970,-58.4660],["Almagro",-34.6100,-58.4200],["Palermo",-34.5800,-58.4250],["Colegiales",-34.5740,-58.4500],["Belgrano",-34.5620,-58.4560],["Núñez",-34.5450,-58.4630],["Saavedra",-34.5540,-58.4860],["Villa Urquiza",-34.5730,-58.4870],["Recoleta",-34.5880,-58.3970],["Chacarita",-34.5880,-58.4540],["Avellaneda",-34.6620,-58.3650],["Dock Sud",-34.6480,-58.3460],["Sarandí",-34.6820,-58.3470],["Lanús",-34.7000,-58.3920],["Valentín Alsina",-34.6720,-58.4110],["Vicente López",-34.5260,-58.4730],["Olivos",-34.5080,-58.4950],["Ramos Mejía",-34.6440,-58.5650],["Ciudadela",-34.6380,-58.5420],["Villa Martelli",-34.5510,-58.5070],["Caseros",-34.6050,-58.5640],["San Justo",-34.6830,-58.5610]];
 const REFS=[["Escobar",-34.349,-58.795],["Campana",-34.164,-59.033],["Pilar",-34.458,-58.914],["Tigre",-34.426,-58.580],["San Isidro",-34.471,-58.528],["CABA",-34.604,-58.382],["San Martín",-34.575,-58.537],["Morón",-34.653,-58.620],["Moreno",-34.651,-58.789],["Luján",-34.570,-59.105],["San Justo",-34.683,-58.561],["Lomas de Zamora",-34.761,-58.406],["Quilmes",-34.720,-58.254],["Ezeiza",-34.853,-58.523],["La Plata",-34.921,-57.955],["Berazategui",-34.765,-58.212],["Gral. Rodríguez",-34.608,-58.952],["Zárate",-34.098,-59.029]];
 function mapaHTML(gl){
-  const all=grupos(S.remitos.filter(r=>enDia(r.z)||S.asig[r.c])).filter(g=>g.ll);
+  let all=grupos(S.remitos.filter(r=>enDia(r.z)||S.asig[r.c])).filter(g=>g.ll);
+  if(ui.mapZona)all=all.filter(g=>zk(g.z)===ui.mapZona);
   if(!all.length)return `<div class="mapwrap"><div class="map-h"><h2>Mapa</h2></div><div class="mapnote">Cargá el CSV de clientes exportado de QuadMinds (botón “Cargar archivos”) para ubicar las paradas, ordenar el recorrido y estimar los km.</div></div>`;
   const B=baseLL(),near=all.filter(g=>hav(B,g.ll)<160),lejos=all.length-near.length;
-  let la=[B[0],...near.map(g=>g.ll[0])],lo=[B[1],...near.map(g=>g.ll[1])];
+  const zonasHoy=zonasDia(S.dia);
+  const iniHoy=zonasHoy.filter(z=>inicioZona(z)&&(!ui.mapZona||ui.mapZona===z)).map(z=>[z,inicioZona(z)]);
+  const marco=ui.mapZona?[...(iniHoy.length?[]:[]),...iniHoy.map(x=>x[1])]:[B,...iniHoy.map(x=>x[1])];
+  let la=[...marco.map(p=>p[0]),...near.map(g=>g.ll[0])],lo=[...marco.map(p=>p[1]),...near.map(g=>g.ll[1])];
+  if(!la.length){la=[B[0]];lo=[B[1]]}
   let y0=Math.min(...la),y1=Math.max(...la),x0=Math.min(...lo),x1=Math.max(...lo);
-  const pad=0.03;y0-=pad;y1+=pad;x0-=pad;x1+=pad;
+  const pad=ui.mapZona?0.006:0.03;y0-=pad;y1+=pad;x0-=pad;x1+=pad;
   const kx=Math.cos(((y0+y1)/2)*Math.PI/180),W=1000,sc=W/((x1-x0)*kx),H=Math.max(260,Math.min(700,Math.round((y1-y0)*sc)));
   const sc2=Math.min(sc,H/(y1-y0)),ox=(W-(x1-x0)*kx*sc2)/2;
   const P=ll=>[ox+(ll[1]-x0)*kx*sc2,(y1-ll[0])*sc2];
+  MAPINV={x0,y1,kx,sc2,ox};
   const inB=ll=>ll[0]>=y0&&ll[0]<=y1&&ll[1]>=x0&&ll[1]<=x1;
-  let svg=`<svg class="mapsvg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Mapa de paradas desde ${esc(S.base.nombre)}">`;
-  for(const r of REFS){if(!inB([r[1],r[2]]))continue;const [x,y]=P([r[1],r[2]]);svg+=`<circle class="refdot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2"/><text class="ref" x="${(x+5).toFixed(1)}" y="${(y-4).toFixed(1)}">${esc(r[0])}</text>`}
+  let svg=`<svg class="mapsvg${ui.pick?" picking":""}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Mapa de paradas desde ${esc(S.base.nombre)}">`;
+  for(const r of (ui.mapZona?REFS.concat(REFS_CABA):REFS)){if(!inB([r[1],r[2]]))continue;const [x,y]=P([r[1],r[2]]);svg+=`<circle class="refdot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2"/><text class="ref" x="${(x+5).toFixed(1)}" y="${(y-4).toFixed(1)}">${esc(r[0])}</text>`}
   const fIdx=new Map(S.fletes.map((f,i)=>[f.id,i]));
   S.fletes.forEach((f,i)=>{const gs=grupos(S.remitos.filter(r=>S.asig[r.c]===f.id)).filter(g=>g.ll);if(!gs.length)return;
-    const o=ruta(gs).orden;const pts=[B,...o.filter(g=>g.ll).map(g=>g.ll)].map(P);
+    if(ui.mapZona&&!(f.zonas||[zonaFlete(f)]).includes(ui.mapZona))return;
+    const o=ruta(gs).orden;const st=inicioZona(gs[0].z)||B;const pts=[st,...o.filter(g=>g.ll).map(g=>g.ll)].map(P);
     svg+=`<polyline class="route" stroke="${fleteColor(i)}" points="${pts.map(p=>p[0].toFixed(1)+","+p[1].toFixed(1)).join(" ")}"/>`});
   const libres=new Set(gl.map(g=>g.k));
   const ptsHTML=[];
@@ -708,12 +721,16 @@ function mapaHTML(gl){
     const info=`${g.clientes.join(" / ")} · ${g.loc} · ${fmtKg(g.kg)} kg${free?"":" · "+(S.fletes[i]?.nombre||"")}`;
     ptsHTML.push(`<circle class="pt" data-act="pt" data-k="${esc(g.k)}" data-free="${free?1:0}" data-info="${esc(info)}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}" fill="${free?"var(--panel)":col}" stroke="${sel?"var(--fg)":col}" stroke-width="${sel?3:2}"><title>${esc(info)}</title></circle>`)}
   svg+=ptsHTML.join("");
-  const [bx,by]=P(B);svg+=`<rect class="base" x="${(bx-7).toFixed(1)}" y="${(by-7).toFixed(1)}" width="14" height="14"/><text class="baselbl" x="${(bx+10).toFixed(1)}" y="${(by+4).toFixed(1)}">${esc(S.base.nombre)}</text></svg>`;
+  if(ui.mapZona)for(const g of near){if(g.rs.every(prob))continue;const [x,y]=P(g.ll);svg+=`<text class="ref" style="opacity:.9" x="${(x+9).toFixed(1)}" y="${(y+4).toFixed(1)}">${esc(g.clientes[0].slice(0,22))}</text>`}
+  for(const [z,ll] of iniHoy){const [ix,iy]=P(ll);svg+=`<path class="inicio" d="M${ix.toFixed(1)} ${(iy-9).toFixed(1)} L${(ix+8).toFixed(1)} ${(iy+6).toFixed(1)} L${(ix-8).toFixed(1)} ${(iy+6).toFixed(1)} Z"><title>Inicio ${esc(zTit(z))}</title></path><text class="baselbl" x="${(ix+11).toFixed(1)}" y="${(iy+5).toFixed(1)}">Inicio ${esc(zTit(z))}</text>`}
+  const [bx,by]=P(B);if(!ui.mapZona)svg+=`<rect class="base" x="${(bx-7).toFixed(1)}" y="${(by-7).toFixed(1)}" width="14" height="14"/><text class="baselbl" x="${(bx+10).toFixed(1)}" y="${(by+4).toFixed(1)}">${esc(S.base.nombre)}</text>`;svg+=`</svg>`;
   return `<div class="mapwrap"><div class="map-h"><h2>Mapa de paradas</h2>
     <div class="legend"><span><i style="background:var(--panel);border:2px solid var(--muted)"></i>Sin asignar del día (tocá para seleccionar)</span>${S.fletes.map((f,i)=>`<span><i style="background:${fleteColor(i)}"></i>${esc(f.nombre)}</span>`).join("")}</div>
-    <div class="basebox"><label for="baseIn">Base (lat, long):</label><input id="baseIn" value="${S.base.lat}, ${S.base.lng}"></div></div>
+    <div class="basebox"><label for="mapZ">Ver:</label><select id="mapZ"><option value="">Todo el día</option>${zonasHoy.map(z=>`<option value="${esc(z)}" ${ui.mapZona===z?"selected":""}>${esc(zTit(z))}</option>`).join("")}</select>
+    <label for="baseIn">Base (lat, long):</label><input id="baseIn" value="${S.base.lat}, ${S.base.lng}"></div></div>
+    ${ui.pick?`<div class="notice warn" style="margin:8px 12px"><span>Tocá el mapa en el lugar donde empieza el recorrido de <b>${esc(zTit(ui.pick))}</b>.</span><button class="btn small" data-act="pickno">Cancelar</button></div>`:""}
     <div style="overflow-x:auto">${svg}</div>
-    <div class="mapnote">Las líneas muestran el orden sugerido saliendo de la base hasta la última parada (los fletes no vuelven a la base). Los km son estimados (línea recta × ${VIAL}); el recorrido final lo optimiza QuadMinds.${lejos?` ${lejos} paradas quedan fuera del mapa por estar a más de 160 km.`:""}${S.clientesInfo?` Clientes: ${esc(S.clientesInfo.archivo)}.`:""}</div></div>`;
+    <div class="mapnote">Las líneas muestran el orden sugerido desde el inicio de cada zona (▲, o la base si la zona no tiene inicio marcado) hasta la última parada. Los km son estimados (línea recta × ${VIAL}); el recorrido final lo optimiza QuadMinds.${lejos?` ${lejos} paradas quedan fuera del mapa por estar a más de 160 km.`:""}${S.clientesInfo?` Clientes: ${esc(S.clientesInfo.archivo)}.`:""}</div></div>`;
 }
 function render(){try{renderInner()}catch(e){console.error(e);toast("Algo falló al dibujar la pantalla: "+(e&&e.message||e))}}
 function renderInner(){
@@ -773,12 +790,12 @@ function renderInner(){
     const kg=rs.reduce((a,r)=>a+r.kg,0),pct=f.cap?Math.min(100,kg/f.cap*100):0,over=f.cap&&kg>f.cap;
     const zs=[...new Set(rs.map(r=>zTit(r.z)))];const mezcla=zs.length>1,fuera=rs.some(r=>!enDia(r.z));
     const manana=gs.filter(g=>g.rs.some(r=>soloManana(r.h))).length;
-    const rt=ruta(gs);const gso=rt.orden;
+    const rt=ruta(gs);const gso=rt.orden;const zF=(f.zonas||[zonaFlete(f)])[0]||"";const ini=inicioZona(zF);
     html+=`<article class="flete" style="--fc:${fleteColor(i)}" data-drop="${f.id}">
       <div class="flete-h"><div class="row1"><input class="name" id="fn-${f.id}" data-fname="${f.id}" value="${esc(f.nombre)}" aria-label="Nombre del flete">
         ${ui.confirmDel===f.id?`<span class="confirm">¿Borrar? <button class="btn small danger" data-act="delok" data-f="${f.id}">Sí</button><button class="btn small" data-act="delno">No</button></span>`:`<button class="x" title="Borrar flete" data-act="del" data-f="${f.id}">×</button>`}</div>
-        <div class="metrics" style="grid-template-columns:repeat(4,1fr)"><div><span class="k">Paradas</span><span class="v">${gs.length}</span></div><div><span class="k">Remitos</span><span class="v">${rs.length}</span></div><div><span class="k">Kg</span><span class="v" ${over?'style="color:var(--bad)"':""}>${fmtKg(kg)}</span></div><div><span class="k" title="Desde la base hasta la última parada, estimado">Km aprox.</span><span class="v">${rt.km?Math.round(rt.km):"—"}</span></div></div>
-        <div class="cap"><label for="cap-${f.id}">Capacidad</label><input id="cap-${f.id}" data-fcap="${f.id}" inputmode="numeric" value="${f.cap||""}" placeholder="kg"><div class="bar ${over?"over":""}"><i style="width:${pct}%"></i></div></div>
+        <div class="metrics" style="grid-template-columns:repeat(4,1fr)"><div><span class="k">Paradas</span><span class="v">${gs.length}</span></div><div><span class="k">Remitos</span><span class="v">${rs.length}</span></div><div><span class="k">Kg</span><span class="v" ${over?'style="color:var(--bad)"':""}>${fmtKg(kg)}</span></div><div><span class="k" title="Desde el inicio de la zona (o la base) hasta la última parada, estimado">Km aprox.</span><span class="v">${rt.km?Math.round(rt.km):"—"}</span></div></div>
+        ${zF?`<div class="cap"><span>Inicio:</span><input id="ini-${f.id}" data-finicio="${esc(zF)}" style="width:150px" placeholder="${esc(S.base.nombre)}" value="${ini?ini[0]+", "+ini[1]:""}" title="Pegá lat, long de Google Maps o marcalo en el mapa"><button class="link" data-act="pick" data-z="${esc(zF)}">marcar en el mapa</button>${ini?`<button class="link" data-act="iniquitar" data-z="${esc(zF)}">usar la base</button>`:""}</div>`:""}<div class="cap"><label for="cap-${f.id}">Capacidad</label><input id="cap-${f.id}" data-fcap="${f.id}" inputmode="numeric" value="${f.cap||""}" placeholder="kg"><div class="bar ${over?"over":""}"><i style="width:${pct}%"></i></div></div>
         ${zs.length?`<div class="zchips">${zs.map(z=>`<span class="tag">${esc(z)}</span>`).join("")}${mezcla?`<span class="tag veryold" title="El flete lleva más de una zona">mezcla zonas</span>`:""}${manana?`<span class="tag ${manana>=4?"veryold":"old"}" title="Paradas cuyo horario termina antes de las 13:30">${manana} solo de mañana</span>`:""}${fuera?`<span class="tag old">tiene zonas que no salen el ${esc(DIAS[S.dia])}</span>`:""}</div>`:""}
       </div><div class="flete-list">${gso.length?gso.map((g,n)=>paradaHTML(g,{fl:f.id,n:n+1})).join(""):`<div class="empty-drop">Arrastrá paradas acá o usá “Mover a…”</div>`}</div></article>`;
   });
@@ -795,12 +812,20 @@ function codesOfKeys(keys){const R=S.remitos.filter(r=>!prob(r)&&(!S.asig[r.c]||
 function addFlete(){const n=S.fletes.length+1;S.fletes.push({id:"f"+Date.now().toString(36),nombre:"Flete "+n,cap:1100});markDirty();render()}
 function toast(t){if(EMB){try{if(window.parent.rowaPreplanToast){window.parent.rowaPreplanToast(t);return}}catch(e){}}const el=$("#toast");el.textContent=t;el.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>el.hidden=true,4000)}
 
+let MAPINV=null;
 document.addEventListener("click",e=>{
+  if(ui.pick){const svg=e.target.closest&&e.target.closest("svg.mapsvg");
+    if(svg&&MAPINV){const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const q=pt.matrixTransform(svg.getScreenCTM().inverse());
+      const lng=MAPINV.x0+(q.x-MAPINV.ox)/(MAPINV.kx*MAPINV.sc2),lat=MAPINV.y1-q.y/MAPINV.sc2;
+      S.inicios=S.inicios||{};S.inicios[ui.pick]=[Math.round(lat*1e5)/1e5,Math.round(lng*1e5)/1e5];toast("Inicio de "+zTit(ui.pick)+" guardado.");ui.pick=null;markDirty();render();return}}
   const b=e.target.closest("[data-act]");if(!b)return;const a=b.dataset.act;
   if(a==="pt"){const k=b.dataset.k;if(b.dataset.free==="1"){ui.sel.has(k)?ui.sel.delete(k):ui.sel.add(k);render()}else{toast(b.dataset.info)}return}
   if(a==="dia"){ui.confirmDia=true;render();return}
   if(a==="diano"){ui.confirmDia=false;render();return}
   if(a==="diaok"){ui.confirmDia=false;S.paraFecha=isoF(proxHabilFecha());S.fletes=[];S.asig={};S.nuevos={};S.dia=new Date(S.paraFecha+"T12:00").getDay();ui.sugG=null;ui.notice=`Armado del ${DIAS[S.dia]} ${fechaCorta(S.paraFecha)}: los remitos que no salieron siguen en "Sin asignar" con su fecha de pedido original.`;markDirty();render();return}
+  if(a==="pick"){ui.pick=b.dataset.z;ui.mapa=true;ui.mapZona=b.dataset.z;render();scrollArriba();return}
+  if(a==="pickno"){ui.pick=null;render();return}
+  if(a==="iniquitar"){S.inicios=S.inicios||{};delete S.inicios[b.dataset.z];markDirty();render();return}
   if(a==="tab"){ui.tab=b.dataset.t;render();return}
   if(a==="probopen"){ui.probForm=ui.probForm&&ui.probForm.k===b.dataset.k?null:{k:b.dataset.k};render();return}
   if(a==="probno"){ui.probForm=null;render();return}
@@ -828,7 +853,7 @@ document.addEventListener("click",e=>{
   else if(a==="delok"){const id=b.dataset.f;S.fletes=S.fletes.filter(f=>f.id!==id);for(const c in S.asig)if(S.asig[c]===id)delete S.asig[c];ui.confirmDel=null;markDirty();render()}
   else if(a==="reset"){ui.confirmReset=true;render()}
   else if(a==="resetno"){ui.confirmReset=false;render()}
-  else if(a==="resetok"){S={remitos:[],cargado:null,fletes:[],asig:{},nuevos:{},base:S.base||BASE0,clientesInfo:S.clientesInfo,paraFecha:S.paraFecha,dia:S.dia,problemas:S.problemas||{}};ui.confirmReset=false;ui.sel.clear();ui.undo=null;saveRemitos();markDirty();render()}
+  else if(a==="resetok"){S={remitos:[],cargado:null,fletes:[],asig:{},nuevos:{},base:S.base||BASE0,clientesInfo:S.clientesInfo,paraFecha:S.paraFecha,dia:S.dia,problemas:S.problemas||{},inicios:S.inicios||{...INICIOS0}};ui.confirmReset=false;ui.sel.clear();ui.undo=null;saveRemitos();markDirty();render()}
   else if(a==="closenotice"){ui.notice=null;ui.undo=null;render()}
 });
 document.addEventListener("change",e=>{
@@ -839,6 +864,10 @@ document.addEventListener("change",e=>{
   else if(t.id==="zf"){ui.zona=t.value;render()}
   else if(t.id==="sn"){ui.soloNuevos=t.checked;render()}
   else if(t.id==="ordsel"){ui.orden=t.value;render()}
+  else if(t.id==="mapZ"){ui.mapZona=t.value;render()}
+  else if(t.dataset.finicio!==undefined){const z=t.dataset.finicio;const v=t.value.trim();S.inicios=S.inicios||{};
+    if(!v){delete S.inicios[z];markDirty();render();return}
+    const m=v.match(/(-?\d+[.,]\d+)\s*[,; ]\s*(-?\d+[.,]\d+)/);if(m){S.inicios[z]=[parseFloat(m[1].replace(",",".")),parseFloat(m[2].replace(",","."))];markDirty();render()}else toast("Pegá las coordenadas como en Google Maps, por ejemplo: -34.6295, -58.3745")}
   else if(t.id==="diaSel"){S.dia=parseInt(t.value);ui.sel.clear();ui.zona="";ui.sugG=null;markDirty();render()}
   else if(t.id==="baseIn"){const m=t.value.match(/(-?\d+[.,]\d+)\s*[,; ]\s*(-?\d+[.,]\d+)/);if(m){S.base={nombre:S.base.nombre,lat:parseFloat(m[1].replace(",",".")),lng:parseFloat(m[2].replace(",","."))};markDirty();render()}else toast("Pegá las coordenadas como en Google Maps, por ejemplo: -34.3555, -58.7650")}
   else if(t.dataset.fname){const f=S.fletes.find(f=>f.id===t.dataset.fname);if(f){f.nombre=t.value.trim()||f.nombre;markDirty();render()}}
@@ -895,6 +924,7 @@ $("#exportBtn").onclick=exportar;
 // ---------- arranque ----------
 try{const c=localStorage.getItem(LS+"-cli");if(c)CLI=JSON.parse(c)}catch(e){}
 try{const raw=localStorage.getItem(LS);if(raw){const o=JSON.parse(raw);if(o&&Array.isArray(o.remitos))S=Object.assign(S,o)}}catch(e){}
+if(!S.inicios)S.inicios={...INICIOS0};
 normalizarDia(false);
 render();setSaved("");
 (async()=>{
@@ -904,7 +934,7 @@ render();setSaved("");
   if(!db&&!window.claude){try{db=(window.parent!==window&&window.parent.rowaPreplanStore)||null}catch(e){db=null}}
   if(!db){setSaved("Guardado en este navegador");return}
   db.doc("pre/remitos").onSnapshot(s=>{if(s.exists){const d=cp(s.data());S.remitos=d.lista||[];S.cargado=d.cargado||null;lsSave();render()}},e=>{console.error(e);setSaved("Sin conexión con la nube: se guarda en este navegador")});
-  db.doc("pre/plan").onSnapshot(s=>{if(dirtyPlan||saving)return;if(s.exists){const d=cp(s.data());if(ultimoLocal&&(!d.actualizado||d.actualizado<ultimoLocal))return;S.fletes=d.fletes||[];S.asig=d.asig||{};S.nuevos=d.nuevos||{};S.base=d.base||BASE0;S.problemas=d.problemas||{};S.paraFecha=d.paraFecha||S.paraFecha;normalizarDia(true);S.clientesInfo=d.clientesInfo||null;lsSave();render();setSaved("Guardado")}},()=>{});
+  db.doc("pre/plan").onSnapshot(s=>{if(dirtyPlan||saving)return;if(s.exists){const d=cp(s.data());if(ultimoLocal&&(!d.actualizado||d.actualizado<ultimoLocal))return;S.fletes=d.fletes||[];S.asig=d.asig||{};S.nuevos=d.nuevos||{};S.base=d.base||BASE0;S.problemas=d.problemas||{};S.inicios=d.inicios||S.inicios||{...INICIOS0};S.paraFecha=d.paraFecha||S.paraFecha;normalizarDia(true);S.clientesInfo=d.clientesInfo||null;lsSave();render();setSaved("Guardado")}},()=>{});
 })();
 })();
 </script>
